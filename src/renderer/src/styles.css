@@ -54,7 +54,35 @@ input {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 14px 12px;
+  padding: 16px 10px 12px;
+}
+
+.sidebar.collapsed .sidebar-header {
+  justify-content: center;
+  padding: 12px 4px;
+}
+
+.sidebar-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-toggle {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sidebar-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .brand-mark {

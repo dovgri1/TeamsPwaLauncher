@@ -1,6 +1,7 @@
 export const DEFAULT_TEAMS_URL = 'https://teams.microsoft.com'
 
 export const SIDEBAR_WIDTH = 240
+export const SIDEBAR_COLLAPSED_WIDTH = 44
 
 export const PROFILE_COLORS = [
   '#6264A7',
@@ -71,6 +72,7 @@ export type Profile = {
 export type ProfileStore = {
   profiles: Profile[]
   activeProfileId: string | null
+  sidebarCollapsed: boolean
 }
 
 export type CreateProfileInput = {

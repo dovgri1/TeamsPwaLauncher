@@ -13,6 +13,7 @@ export type TeamsLauncherApi = {
   switchProfile: (id: string) => Promise<ProfileStore>
   reloadProfile: (id: string) => Promise<ProfileStore>
   listUnread: () => Promise<UnreadMap>
+  setSidebarCollapsed: (collapsed: boolean) => Promise<ProfileStore>
   openContextMenu: (id: string) => void
   onChanged: (callback: (store: ProfileStore) => void) => () => void
   onUnread: (callback: (unread: UnreadMap) => void) => () => void

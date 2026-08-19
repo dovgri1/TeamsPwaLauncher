@@ -16,6 +16,8 @@ const teamsLauncher = {
   switchProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:switch', id),
   reloadProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:reload', id),
   listUnread: (): Promise<UnreadMap> => ipcRenderer.invoke('unread:list'),
+  setSidebarCollapsed: (collapsed: boolean): Promise<ProfileStore> =>
+    ipcRenderer.invoke('ui:setSidebarCollapsed', collapsed),
   openContextMenu: (id: string): void => {
     ipcRenderer.send('profiles:contextMenu', id)
   },

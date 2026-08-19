@@ -10,7 +10,7 @@ import {
   type Session,
   type WebContents
 } from 'electron'
-import { SIDEBAR_WIDTH, type Profile, type UnreadBadge, type UnreadMap } from '../shared/types'
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH, type Profile, type UnreadBadge, type UnreadMap } from '../shared/types'
 
 const views = new Map<string, WebContentsView>()
 const configuredSessions = new Set<string>()
@@ -21,7 +21,9 @@ let mainWindow: BrowserWindow | null = null
 let activeProfileId: string | null = null
 let onSwitchIndex: ((index: number) => void) | null = null
 let onUnreadChange: ((unread: UnreadMap) => void) | null = null
+let onToggleSidebar: (() => void) | null = null
 let unreadPoll: ReturnType<typeof setInterval> | null = null
+let sidebarOffset = SIDEBAR_WIDTH
 
 const BADGE_SCRIPT = `(() => {
   if (window.__teamsLauncherBadgeHook) return;
@@ -88,6 +90,15 @@ export function setSwitchIndexHandler(handler: (index: number) => void): void {
 
 export function setUnreadHandler(handler: (unread: UnreadMap) => void): void {
   onUnreadChange = handler
+}
+
+export function setToggleSidebarHandler(handler: () => void): void {
+  onToggleSidebar = handler
+}
+
+export function setSidebarCollapsed(collapsed: boolean): void {
+  sidebarOffset = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH
+  syncActiveBounds()
 }
 
 export function getUnreadMap(): UnreadMap {
@@ -380,6 +391,12 @@ function handleShortcut(event: Electron.Event, input: Electron.Input): void {
     return
   }
 
+  if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 'b') {
+    event.preventDefault()
+    onToggleSidebar?.()
+    return
+  }
+
   if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 'r') {
     event.preventDefault()
     activeView()?.webContents.reload()
@@ -422,9 +439,9 @@ function syncActiveBounds(): void {
   }
 
   view.setBounds({
-    x: SIDEBAR_WIDTH,
+    x: sidebarOffset,
     y: 0,
-    width: Math.max(0, width - SIDEBAR_WIDTH),
+    width: Math.max(0, width - sidebarOffset),
     height
   })
 }

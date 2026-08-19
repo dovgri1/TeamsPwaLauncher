@@ -11,6 +11,8 @@ import {
   initTeamsViews,
   reloadProfile,
   setSwitchIndexHandler,
+  setToggleSidebarHandler,
+  setSidebarCollapsed,
   setUnreadHandler,
   showProfile,
   syncBounds,
@@ -19,7 +21,7 @@ import {
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
-let store: ProfileStore = { profiles: [], activeProfileId: null }
+let store: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
 let unread: UnreadMap = {}
 
 app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
@@ -41,11 +43,15 @@ app.whenReady().then(() => {
 
   electronApp.setAppUserModelId('com.domestiquesolutions.teamspwalauncher')
   store = loadStore()
+  setSidebarCollapsed(store.sidebarCollapsed)
   setSwitchIndexHandler((index) => {
     const profile = store.profiles[index]
     if (profile) {
       void switchProfile(profile.id)
     }
+  })
+  setToggleSidebarHandler(() => {
+    applySidebarCollapsed(!store.sidebarCollapsed)
   })
   setUnreadHandler((next) => {
     unread = next
@@ -130,6 +136,10 @@ function registerIpc(): void {
     return store
   })
   ipcMain.handle('unread:list', () => getUnreadMap())
+  ipcMain.handle('ui:setSidebarCollapsed', (_event, collapsed: boolean) => {
+    applySidebarCollapsed(collapsed)
+    return store
+  })
   ipcMain.on('profiles:contextMenu', (event, id: string) => {
     const profile = store.profiles.find((item) => item.id === id)
     if (!profile) {
@@ -148,6 +158,7 @@ function registerIpc(): void {
 function createProfile(input: CreateProfileInput): ProfileStore {
   const profile = createProfileRecord(input.name, input.color, input.icon, input.url)
   store = {
+    ...store,
     profiles: [...store.profiles, profile],
     activeProfileId: profile.id
   }
@@ -203,7 +214,7 @@ async function deleteProfile(id: string): Promise<ProfileStore> {
   const profiles = store.profiles.filter((item) => item.id !== id)
   const activeProfileId =
     store.activeProfileId === id ? (profiles[0]?.id ?? null) : store.activeProfileId
-  store = { profiles, activeProfileId }
+  store = { ...store, profiles, activeProfileId }
   persist()
 
   if (activeProfileId) {
@@ -246,6 +257,14 @@ function restoreActiveProfile(): void {
 
 function persist(): void {
   saveStore(store)
+}
+
+function applySidebarCollapsed(collapsed: boolean): void {
+  store = { ...store, sidebarCollapsed: collapsed }
+  persist()
+  setSidebarCollapsed(collapsed)
+  broadcast()
+  mainWindow?.setMenu(buildAppMenu())
 }
 
 function broadcast(): void {
@@ -293,6 +312,11 @@ function buildAppMenu(): Menu {
               reloadProfile(store.activeProfileId)
             }
           }
+        },
+        {
+          label: store.sidebarCollapsed ? 'Show tenant sidebar' : 'Hide tenant sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => applySidebarCollapsed(!store.sidebarCollapsed)
         },
         { type: 'separator' },
         {

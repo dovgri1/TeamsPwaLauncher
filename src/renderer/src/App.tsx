@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type JSX, type MouseEvent } from 'react'
 import {
   PROFILE_COLORS,
+  SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_WIDTH,
   type Profile,
   type ProfileIconId,
@@ -10,7 +11,7 @@ import {
 } from '../../shared/types'
 import { ICON_CHOICES, ProfileIcon } from './ProfileIcon'
 
-const emptyStore: ProfileStore = { profiles: [], activeProfileId: null }
+const emptyStore: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
 
 export default function App(): JSX.Element {
   const [store, setStore] = useState<ProfileStore>(emptyStore)
@@ -97,18 +98,52 @@ export default function App(): JSX.Element {
     setDraftName('')
   }
 
+  const collapsed = store.sidebarCollapsed
+
+  async function toggleSidebar(): Promise<void> {
+    await window.teamsLauncher.setSidebarCollapsed(!collapsed)
+  }
+
   return (
-    <div className="shell">
-      <aside className="sidebar" style={{ width: SIDEBAR_WIDTH }}>
+    <div className={collapsed ? 'shell collapsed' : 'shell'}>
+      <aside
+        className={collapsed ? 'sidebar collapsed' : 'sidebar'}
+        style={{ width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH }}
+      >
         <header className="sidebar-header">
-          <div className="brand-mark">T</div>
-          <div>
-            <h1>Teams</h1>
-            <p>Profiles</p>
-          </div>
+          {collapsed ? (
+            <button
+              type="button"
+              className="sidebar-toggle"
+              title="Show tenant sidebar (Ctrl+B)"
+              aria-label="Show tenant sidebar"
+              onClick={() => void toggleSidebar()}
+            >
+              ›
+            </button>
+          ) : (
+            <>
+              <div className="brand-mark">T</div>
+              <div className="sidebar-title">
+                <h1>Teams</h1>
+                <p>Tenants</p>
+              </div>
+              <button
+                type="button"
+                className="sidebar-toggle"
+                title="Hide tenant sidebar (Ctrl+B)"
+                aria-label="Hide tenant sidebar"
+                onClick={() => void toggleSidebar()}
+              >
+                ‹
+              </button>
+            </>
+          )}
         </header>
 
-        <nav className="profile-list" aria-label="Teams profiles">
+        {!collapsed ? (
+          <>
+        <nav className="profile-list" aria-label="Teams tenants">
           {store.profiles.map((profile, index) => (
             <ProfileRow
               key={profile.id}
@@ -204,8 +239,10 @@ export default function App(): JSX.Element {
 
         <footer className="sidebar-footer">
           <span>Ctrl+1–9 switch</span>
-          <span>Ctrl+R reload</span>
+          <span>Ctrl+B hide</span>
         </footer>
+          </>
+        ) : null}
       </aside>
 
       <main className="stage">
