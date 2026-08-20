@@ -12,6 +12,7 @@ export type TeamsLauncherApi = {
   deleteProfile: (id: string) => Promise<ProfileStore>
   switchProfile: (id: string) => Promise<ProfileStore>
   reloadProfile: (id: string) => Promise<ProfileStore>
+  clearSession: (id: string) => Promise<ProfileStore>
   detachProfile: (id: string) => Promise<{ store: ProfileStore; detachedIds: string[] }>
   reattachProfile: (id: string) => Promise<{ store: ProfileStore; detachedIds: string[] }>
   focusDetached: (id: string) => Promise<string[]>

@@ -328,6 +328,18 @@ function reattachView(id: string, makeActive: boolean): void {
 }
 
 export async function destroyProfileView(id: string): Promise<void> {
+  await tearDownProfileView(id)
+  await clearProfilePartition(id)
+}
+
+/** Close the view, wipe cookies/storage for this profile, then open a fresh Teams session. */
+export async function clearProfileSession(profile: Profile): Promise<void> {
+  await tearDownProfileView(profile.id)
+  await clearProfilePartition(profile.id)
+  showProfile(profile)
+}
+
+async function tearDownProfileView(id: string): Promise<void> {
   const popout = popouts.get(id)
   if (popout) {
     popouts.delete(id)
@@ -359,18 +371,40 @@ export async function destroyProfileView(id: string): Promise<void> {
   titleUnread.delete(id)
   badgeUnread.delete(id)
   publishUnread(true)
+}
 
+async function clearProfilePartition(id: string): Promise<void> {
   const ses = session.fromPartition(`persist:${id}`)
   await ses.clearCache()
-  await ses.clearStorageData()
-  configuredSessions.delete(id)
+  await ses.clearStorageData({
+    storages: [
+      'cookies',
+      'filesystem',
+      'indexdb',
+      'localstorage',
+      'shadercache',
+      'websql',
+      'serviceworkers',
+      'cachestorage'
+    ]
+  })
+  // Keep session hooks registered so clear+reopen does not stack webRequest handlers.
 }
 
 export function attachAppWebContentsHandlers(): void {
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler((details) => handleWindowOpen(details, contents))
     contents.on('will-navigate', (event, url) => {
-      if (isAppRendererUrl(url) || isAllowedTeamsUrl(url)) {
+      if (isAppRendererUrl(url)) {
+        return
+      }
+      const rewritten = preferWorkAccountLogin(url)
+      if (rewritten) {
+        event.preventDefault()
+        void contents.loadURL(rewritten)
+        return
+      }
+      if (isAllowedTeamsUrl(url)) {
         return
       }
       event.preventDefault()
@@ -412,7 +446,7 @@ function createView(profile: Profile): WebContentsView {
   view.webContents.setUserAgent(chromeUserAgent())
   attachUnreadTracking(profile.id, view.webContents)
   view.setVisible(false)
-  void view.webContents.loadURL(profile.url)
+  void view.webContents.loadURL(teamsEntryUrl(profile.url))
   return view
 }
 
@@ -427,6 +461,25 @@ function configureSession(ses: Session, profileId: string): void {
     callback(isAllowedPermission(permission))
   })
   ses.setPermissionCheckHandler((_contents, permission) => isAllowedPermission(permission))
+
+  // Prefer work/school email entry over Windows personal Microsoft account shortcuts.
+  ses.webRequest.onBeforeRequest(
+    {
+      urls: [
+        'https://login.microsoftonline.com/*',
+        'https://login.microsoft.com/*',
+        'https://login.windows.net/*'
+      ]
+    },
+    (details, callback) => {
+      const rewritten = preferWorkAccountLogin(details.url)
+      if (rewritten) {
+        callback({ redirectURL: rewritten })
+        return
+      }
+      callback({})
+    }
+  )
 
   ses.setDisplayMediaRequestHandler((_request, callback) => {
     void pickDisplaySource(mainWindow)
@@ -444,6 +497,66 @@ function configureSession(ses: Session, profileId: string): void {
         callback({})
       })
   })
+}
+
+/** Start Teams in a way that leads to an email field, not a personal-account shortcut. */
+function teamsEntryUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    if (!/(?:^|\.)teams\.microsoft\.com$/i.test(parsed.hostname)) {
+      return url
+    }
+    if (!parsed.searchParams.has('prompt')) {
+      parsed.searchParams.set('prompt', 'login')
+    }
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Rewrite Microsoft login URLs so Windows does not push a personal MSA.
+ * - common/consumers → organizations (work/school)
+ * - prompt=login when unset (skip silent prompt=none renewals)
+ */
+function preferWorkAccountLogin(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+
+  const host = parsed.hostname.toLowerCase()
+  if (
+    host !== 'login.microsoftonline.com' &&
+    host !== 'login.microsoft.com' &&
+    host !== 'login.windows.net'
+  ) {
+    return null
+  }
+
+  let changed = false
+  const nextPath = parsed.pathname.replace(/^\/(common|consumers)(?=\/|$)/i, '/organizations')
+  if (nextPath !== parsed.pathname) {
+    parsed.pathname = nextPath
+    changed = true
+  }
+
+  const prompt = parsed.searchParams.get('prompt')
+  if (prompt === null && !/\/logout/i.test(parsed.pathname)) {
+    parsed.searchParams.set('prompt', 'login')
+    changed = true
+  }
+
+  // Discourage MSA federation on the work login page.
+  if (!parsed.searchParams.has('msafed')) {
+    parsed.searchParams.set('msafed', '0')
+    changed = true
+  }
+
+  return changed ? parsed.toString() : null
 }
 
 function chromeUserAgent(): string {

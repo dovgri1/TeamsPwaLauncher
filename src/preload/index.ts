@@ -15,6 +15,8 @@ const teamsLauncher = {
   deleteProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:delete', id),
   switchProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:switch', id),
   reloadProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:reload', id),
+  clearSession: (id: string): Promise<ProfileStore> =>
+    ipcRenderer.invoke('profiles:clearSession', id),
   detachProfile: (id: string): Promise<{ store: ProfileStore; detachedIds: string[] }> =>
     ipcRenderer.invoke('profiles:detach', id),
   reattachProfile: (id: string): Promise<{ store: ProfileStore; detachedIds: string[] }> =>

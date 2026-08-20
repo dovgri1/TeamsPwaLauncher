@@ -125,10 +125,14 @@ When Teams asks to share your screen, a picker lists your **screens** and **wind
 | `Ctrl+R` | Reload the focused Teams view |
 | `Ctrl+B` | Show / hide the tenant sidebar |
 | `Ctrl+Shift+D` | Detach the active tenant |
-| Right-click a profile | Edit, detach/reattach, reload, or delete |
+| Right-click a profile | Edit, detach/reattach, reload, clear session, or delete |
 | Double-click a profile | Edit name / icon / color |
 
-Deleting a profile signs it out and clears that profile’s cookies and local Teams data.
+**Clear session** (right-click a profile, or **View → Clear session for active profile**) signs that tenant out and wipes its cookies and local Teams data, then reloads a fresh sign-in page. Use this when a login is stuck (e.g. AADSTS errors). The profile itself stays in the sidebar.
+
+Deleting a profile also clears that profile’s cookies and local Teams data, and removes it from the list.
+
+Sign-in prefers **work or school** accounts (email entry). Windows personal Microsoft account shortcuts are steered away so you can type the tenant email normally.
 
 ## Develop locally
 

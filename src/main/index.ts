@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { createProfileRecord, loadStore, saveStore } from './profiles'
 import {
   attachAppWebContentsHandlers,
+  clearProfileSession,
   destroyProfileView,
   detachProfile,
   focusDetached,
@@ -163,6 +164,7 @@ function registerIpc(): void {
     reloadProfile(id)
     return store
   })
+  ipcMain.handle('profiles:clearSession', (_event, id: string) => clearSession(id))
   ipcMain.handle('profiles:detach', (_event, id: string) => {
     const profile = store.profiles.find((item) => item.id === id)
     if (profile) {
@@ -200,6 +202,7 @@ function registerIpc(): void {
     const detached = isDetached(id)
     Menu.buildFromTemplate([
       { label: 'Reload Teams', click: () => reloadProfile(id) },
+      { label: 'Clear session…', click: () => void clearSession(id) },
       { label: 'Edit profile', click: () => event.sender.send('profiles:startEdit', id) },
       { type: 'separator' },
       ...(detached
@@ -261,6 +264,35 @@ function updateProfile(input: UpdateProfileInput): ProfileStore {
     )
   }
   persist()
+  broadcast()
+  updateWindowTitle()
+  return store
+}
+
+async function clearSession(id: string): Promise<ProfileStore> {
+  const profile = store.profiles.find((item) => item.id === id)
+  if (!profile || !mainWindow) {
+    return store
+  }
+
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Cancel', 'Clear session'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Clear session',
+    message: `Clear session for “${profile.name}”?`,
+    detail:
+      'This signs you out of this profile and clears its cookies and local Teams data. The profile stays in the sidebar so you can sign in again.'
+  })
+
+  if (response !== 1) {
+    return store
+  }
+
+  store = { ...store, activeProfileId: id }
+  persist()
+  await clearProfileSession(profile)
   broadcast()
   updateWindowTitle()
   return store
@@ -392,6 +424,14 @@ function buildAppMenu(): Menu {
           click: () => {
             if (store.activeProfileId) {
               reloadProfile(store.activeProfileId)
+            }
+          }
+        },
+        {
+          label: 'Clear session for active profile…',
+          click: () => {
+            if (store.activeProfileId) {
+              void clearSession(store.activeProfileId)
             }
           }
         },
