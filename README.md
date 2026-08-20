@@ -22,7 +22,7 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 - **Unread badges** — see notification counts per tenant in the sidebar  
 - **Detachable windows** — keep a call in a pop-out while messaging in another tenant  
 - **Screen share picker** — choose which monitor or window to share  
-- **Collapsible sidebar** — hide the tenant list for more space (`Ctrl+B`)  
+- **Collapsible sidebar** — icon rail when collapsed, full tenant list when expanded (`Ctrl+B`)  
 - **Linux & Windows** — `.deb` / AppImage and Windows installer / portable exe  
 
 ## Install on Linux
@@ -59,7 +59,7 @@ chmod +x teams-pwa-launcher-1.0.0.AppImage
 Requires [Node.js](https://nodejs.org/) 20.19+ or 22.12+.
 
 ```bash
-git clone <this-repository-url>
+git clone https://github.com/dovgri1/TeamsPwaLauncher.git
 cd TeamsPwaLauncher
 npm install
 npm run build:linux
@@ -123,7 +123,7 @@ When Teams asks to share your screen, a picker lists your **screens** and **wind
 | --- | --- |
 | `Ctrl+1` … `Ctrl+9` | Switch to tenant 1–9 |
 | `Ctrl+R` | Reload the focused Teams view |
-| `Ctrl+B` | Show / hide the tenant sidebar |
+| `Ctrl+B` | Collapse / expand the tenant sidebar (icons stay visible when collapsed) |
 | `Ctrl+Shift+D` | Detach the active tenant |
 | Right-click a profile | Edit, detach/reattach, reload, clear session, or delete |
 | Double-click a profile | Edit name / icon / color |
@@ -162,7 +162,9 @@ Reinstalling the app does **not** remove this folder. Delete it yourself only if
 - Logins stay on your machine in isolated browser partitions.  
 - The app does not send your Teams data to a third-party server.  
 - You sign in through Microsoft’s own sign-in pages, same as Teams in a normal browser.  
+- Navigation is limited to known Microsoft / Teams hosts; other links open in your system browser over `https` only.  
+- Profile entry URLs are validated so partitions cannot be pointed at arbitrary sites.
 
 ## License
 
-MIT — see [package.json](package.json). Contributions and issue reports are welcome.
+MIT — see [LICENSE](LICENSE). Contributions and issue reports are welcome.

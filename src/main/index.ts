@@ -27,6 +27,7 @@ import {
   toggleActiveDevTools
 } from './teamsView'
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
+import { sanitizeProfileUrl } from '../shared/teamsUrls'
 
 let mainWindow: BrowserWindow | null = null
 let store: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
@@ -258,7 +259,7 @@ function updateProfile(input: UpdateProfileInput): ProfileStore {
             name: input.name?.trim() || profile.name,
             color: input.color ?? profile.color,
             icon: input.icon ?? profile.icon,
-            url: input.url?.trim() || profile.url
+            url: input.url !== undefined ? sanitizeProfileUrl(input.url) : profile.url
           }
         : profile
     )

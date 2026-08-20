@@ -62,6 +62,9 @@ export default function App(): JSX.Element {
     setDraftName('')
     setDraftColor(nextColor)
     setDraftIcon('letter')
+    if (collapsed) {
+      void window.teamsLauncher.setSidebarCollapsed(false)
+    }
   }
 
   function openEdit(profile: Profile): void {
@@ -70,6 +73,9 @@ export default function App(): JSX.Element {
     setDraftName(profile.name)
     setDraftColor(profile.color)
     setDraftIcon(profile.icon)
+    if (collapsed) {
+      void window.teamsLauncher.setSidebarCollapsed(false)
+    }
   }
 
   function closeForm(): void {
@@ -145,14 +151,13 @@ export default function App(): JSX.Element {
           )}
         </header>
 
-        {!collapsed ? (
-          <>
         <nav className="profile-list" aria-label="Teams tenants">
           {store.profiles.map((profile, index) => (
             <ProfileRow
               key={profile.id}
               profile={profile}
               index={index}
+              collapsed={collapsed}
               active={profile.id === store.activeProfileId && !detachedIds.includes(profile.id)}
               detached={detachedIds.includes(profile.id)}
               unread={unread[profile.id]}
@@ -166,11 +171,13 @@ export default function App(): JSX.Element {
             />
           ))}
 
-          {store.profiles.length === 0 && formMode !== 'add' ? (
+          {!collapsed && store.profiles.length === 0 && formMode !== 'add' ? (
             <p className="empty-hint">No profiles yet. Add one to sign in to Teams.</p>
           ) : null}
         </nav>
 
+        {!collapsed ? (
+          <>
         {formMode !== 'hidden' ? (
           <form
             className="profile-form"
@@ -248,7 +255,17 @@ export default function App(): JSX.Element {
           <span>Ctrl+Shift+D detach</span>
         </footer>
           </>
-        ) : null}
+        ) : (
+          <button
+            type="button"
+            className="add-button collapsed-add"
+            title="Add profile"
+            aria-label="Add profile"
+            onClick={openAdd}
+          >
+            +
+          </button>
+        )}
       </aside>
 
       <main className="stage">
@@ -271,6 +288,7 @@ export default function App(): JSX.Element {
 function ProfileRow({
   profile,
   index,
+  collapsed,
   active,
   detached,
   unread,
@@ -281,6 +299,7 @@ function ProfileRow({
 }: {
   profile: Profile
   index: number
+  collapsed: boolean
   active: boolean
   detached: boolean
   unread?: UnreadBadge
@@ -291,8 +310,10 @@ function ProfileRow({
 }): JSX.Element {
   const letter = profile.name.trim().charAt(0).toUpperCase() || 'T'
   const badgeLabel = formatUnread(unread)
+  const shortcut = detached ? 'Detached' : index < 9 ? `Ctrl+${index + 1}` : ''
   const rowClass = [
     'profile-row',
+    collapsed ? 'collapsed' : '',
     active ? 'active' : '',
     detached ? 'detached' : ''
   ]
@@ -304,6 +325,8 @@ function ProfileRow({
       role="button"
       tabIndex={0}
       className={rowClass}
+      title={collapsed ? `${profile.name}${shortcut ? ` (${shortcut})` : ''}` : undefined}
+      aria-label={profile.name}
       onClick={onSelect}
       onContextMenu={onContextMenu}
       onDoubleClick={(event) => {
@@ -323,25 +346,27 @@ function ProfileRow({
         </span>
         {badgeLabel ? <span className="unread-badge">{badgeLabel}</span> : null}
       </span>
-      <span className="profile-meta">
-        <span className="profile-name">{profile.name}</span>
-        <span className="profile-shortcut">
-          {detached ? 'Detached' : index < 9 ? `Ctrl+${index + 1}` : null}
-        </span>
-      </span>
-      {!detached ? (
-        <button
-          type="button"
-          className="detach-button"
-          title="Detach window"
-          aria-label={`Detach ${profile.name}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onDetach()
-          }}
-        >
-          ↗
-        </button>
+      {!collapsed ? (
+        <>
+          <span className="profile-meta">
+            <span className="profile-name">{profile.name}</span>
+            <span className="profile-shortcut">{shortcut || null}</span>
+          </span>
+          {!detached ? (
+            <button
+              type="button"
+              className="detach-button"
+              title="Detach window"
+              aria-label={`Detach ${profile.name}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                onDetach()
+              }}
+            >
+              ↗
+            </button>
+          ) : null}
+        </>
       ) : null}
     </div>
   )

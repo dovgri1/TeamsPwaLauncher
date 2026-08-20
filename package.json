@@ -5,8 +5,8 @@
   "version": "1.0.0",
   "description": "Switch between multiple Microsoft Teams web profiles in one desktop app",
   "main": "./out/main/index.js",
-  "author": "Domestique Solutions",
-  "homepage": "https://github.com/DomestiqueSolutions/TeamsPwaLauncher",
+  "author": "Dovydas Grigaitis",
+  "homepage": "https://github.com/dovgri1/TeamsPwaLauncher",
   "license": "MIT",
   "scripts": {
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

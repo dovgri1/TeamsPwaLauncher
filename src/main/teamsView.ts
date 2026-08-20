@@ -18,6 +18,7 @@ import {
   type UnreadBadge,
   type UnreadMap
 } from '../shared/types'
+import { isAllowedTeamsUrl, isSafeExternalUrl, sanitizeProfileUrl } from '../shared/teamsUrls'
 
 const views = new Map<string, WebContentsView>()
 const popouts = new Map<string, BrowserWindow>()
@@ -67,32 +68,6 @@ const BADGE_SCRIPT = `(() => {
   }
   emit(parse(document.title));
 })();`
-
-const ALLOWED_HOSTS = [
-  /(?:^|\.)microsoft\.com$/i,
-  /(?:^|\.)microsoftonline\.com$/i,
-  /(?:^|\.)microsoftonline-p\.com$/i,
-  /(?:^|\.)msauth\.net$/i,
-  /(?:^|\.)msauthimages\.net$/i,
-  /(?:^|\.)msecnd\.net$/i,
-  /(?:^|\.)live\.com$/i,
-  /(?:^|\.)office\.com$/i,
-  /(?:^|\.)office365\.com$/i,
-  /(?:^|\.)office\.net$/i,
-  /(?:^|\.)sharepoint\.com$/i,
-  /(?:^|\.)sharepointonline\.com$/i,
-  /(?:^|\.)cloud\.microsoft$/i,
-  /(?:^|\.)microsoft365\.com$/i,
-  /(?:^|\.)skype\.com$/i,
-  /(?:^|\.)aka\.ms$/i,
-  /(?:^|\.)azure\.net$/i,
-  /(?:^|\.)azureedge\.net$/i,
-  /(?:^|\.)windows\.net$/i,
-  /(?:^|\.)svc\.ms$/i,
-  /(?:^|\.)microsoftpersonalcontent\.com$/i,
-  /(?:^|\.)msftauth\.net$/i,
-  /(?:^|\.)msftauthimages\.net$/i
-]
 
 export function setSwitchIndexHandler(handler: (index: number) => void): void {
   onSwitchIndex = handler
@@ -395,20 +370,10 @@ export function attachAppWebContentsHandlers(): void {
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler((details) => handleWindowOpen(details, contents))
     contents.on('will-navigate', (event, url) => {
-      if (isAppRendererUrl(url)) {
-        return
-      }
-      const rewritten = preferWorkAccountLogin(url)
-      if (rewritten) {
-        event.preventDefault()
-        void contents.loadURL(rewritten)
-        return
-      }
-      if (isAllowedTeamsUrl(url)) {
-        return
-      }
-      event.preventDefault()
-      void shell.openExternal(url)
+      handleNavigation(event, contents, url, 'navigate')
+    })
+    contents.on('will-redirect', (event, url) => {
+      handleNavigation(event, contents, url, 'redirect')
     })
     contents.on('context-menu', (_event, params) => {
       if (contents === mainWindow?.webContents) {
@@ -420,6 +385,36 @@ export function attachAppWebContentsHandlers(): void {
       handleShortcut(event, input)
     })
   })
+}
+
+function handleNavigation(
+  event: { preventDefault: () => void },
+  contents: WebContents,
+  url: string,
+  mode: 'navigate' | 'redirect'
+): void {
+  if (isAppRendererUrl(contents, url)) {
+    return
+  }
+  if (mode === 'navigate') {
+    const rewritten = preferWorkAccountLogin(url)
+    if (rewritten) {
+      event.preventDefault()
+      void contents.loadURL(rewritten)
+      return
+    }
+  }
+  if (isAllowedTeamsUrl(url)) {
+    return
+  }
+  event.preventDefault()
+  openExternalSafely(url)
+}
+
+function openExternalSafely(url: string): void {
+  if (isSafeExternalUrl(url)) {
+    void shell.openExternal(url)
+  }
 }
 
 export function syncBounds(): void {
@@ -446,7 +441,7 @@ function createView(profile: Profile): WebContentsView {
   view.webContents.setUserAgent(chromeUserAgent())
   attachUnreadTracking(profile.id, view.webContents)
   view.setVisible(false)
-  void view.webContents.loadURL(teamsEntryUrl(profile.url))
+  void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
   return view
 }
 
@@ -612,11 +607,20 @@ function handleWindowOpen(
     }
   }
 
-  void shell.openExternal(details.url)
+  void openExternalSafely(details.url)
   return { action: 'deny' }
 }
 
-function isAllowedTeamsUrl(url: string): boolean {
+function isAppRendererUrl(contents: WebContents, url: string): boolean {
+  // Only the launcher UI (sidebar) may load local/dev renderer URLs — never Teams partitions.
+  if (contents !== mainWindow?.webContents) {
+    return false
+  }
+
+  if (url === 'about:blank' || url.startsWith('devtools:')) {
+    return true
+  }
+
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -624,20 +628,15 @@ function isAllowedTeamsUrl(url: string): boolean {
     return false
   }
 
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return false
+  if (parsed.protocol === 'file:') {
+    return true
   }
 
-  return ALLOWED_HOSTS.some((pattern) => pattern.test(parsed.hostname))
-}
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+  }
 
-function isAppRendererUrl(url: string): boolean {
-  return (
-    url.startsWith('file:') ||
-    url.startsWith('http://localhost') ||
-    url.startsWith('http://127.0.0.1') ||
-    url.startsWith('devtools:')
-  )
+  return false
 }
 
 function showTeamsContextMenu(contents: WebContents, params: Electron.ContextMenuParams): void {

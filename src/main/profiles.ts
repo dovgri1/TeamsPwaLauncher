@@ -3,13 +3,13 @@ import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
-  DEFAULT_TEAMS_URL,
   PROFILE_COLORS,
   PROFILE_ICON_IDS,
   type Profile,
   type ProfileIconId,
   type ProfileStore
 } from '../shared/types'
+import { sanitizeProfileUrl } from '../shared/teamsUrls'
 
 function storePath(): string {
   return join(app.getPath('userData'), 'profiles.json')
@@ -52,7 +52,7 @@ export function createProfileRecord(
     name: trimmed || 'Teams',
     color: color || PROFILE_COLORS[0],
     icon: isIconId(icon) ? icon : 'letter',
-    url: url?.trim() || DEFAULT_TEAMS_URL
+    url: sanitizeProfileUrl(url)
   }
 }
 
@@ -75,7 +75,7 @@ function normalizeProfile(value: unknown): Profile | null {
     name: profile.name,
     color: profile.color,
     icon: isIconId(profile.icon) ? profile.icon : 'letter',
-    url: profile.url
+    url: sanitizeProfileUrl(profile.url)
   }
 }
 
