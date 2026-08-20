@@ -6,10 +6,17 @@ import { createProfileRecord, loadStore, saveStore } from './profiles'
 import {
   attachAppWebContentsHandlers,
   destroyProfileView,
+  detachProfile,
+  focusDetached,
+  getDetachedIds,
   getUnreadMap,
   hideAllViews,
   initTeamsViews,
+  isDetached,
+  reattachProfile,
   reloadProfile,
+  setActiveClearedHandler,
+  setDetachedChangeHandler,
   setSwitchIndexHandler,
   setToggleSidebarHandler,
   setSidebarCollapsed,
@@ -23,6 +30,7 @@ import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } 
 let mainWindow: BrowserWindow | null = null
 let store: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
 let unread: UnreadMap = {}
+let detachedIds: string[] = []
 
 app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
 if (process.platform === 'linux') {
@@ -56,6 +64,26 @@ app.whenReady().then(() => {
   setUnreadHandler((next) => {
     unread = next
     mainWindow?.webContents.send('unread:changed', unread)
+    updateWindowTitle()
+  })
+  setDetachedChangeHandler((ids) => {
+    detachedIds = ids
+    mainWindow?.webContents.send('detached:changed', detachedIds)
+  })
+  setActiveClearedHandler(() => {
+    const next = store.profiles.find((profile) => !isDetached(profile.id))
+    if (next) {
+      store = { ...store, activeProfileId: next.id }
+      persist()
+      showProfile(next)
+      broadcast()
+      updateWindowTitle()
+      return
+    }
+    store = { ...store, activeProfileId: null }
+    persist()
+    hideAllViews()
+    broadcast()
     updateWindowTitle()
   })
   registerIpc()
@@ -135,6 +163,29 @@ function registerIpc(): void {
     reloadProfile(id)
     return store
   })
+  ipcMain.handle('profiles:detach', (_event, id: string) => {
+    const profile = store.profiles.find((item) => item.id === id)
+    if (profile) {
+      detachProfile(profile)
+    }
+    return { store, detachedIds: getDetachedIds() }
+  })
+  ipcMain.handle('profiles:reattach', (_event, id: string) => {
+    reattachProfile(id)
+    const profile = store.profiles.find((item) => item.id === id)
+    if (profile) {
+      store = { ...store, activeProfileId: id }
+      persist()
+      broadcast()
+      updateWindowTitle()
+    }
+    return { store, detachedIds: getDetachedIds() }
+  })
+  ipcMain.handle('profiles:focusDetached', (_event, id: string) => {
+    focusDetached(id)
+    return getDetachedIds()
+  })
+  ipcMain.handle('detached:list', () => getDetachedIds())
   ipcMain.handle('unread:list', () => getUnreadMap())
   ipcMain.handle('ui:setSidebarCollapsed', (_event, collapsed: boolean) => {
     applySidebarCollapsed(collapsed)
@@ -146,9 +197,34 @@ function registerIpc(): void {
       return
     }
 
+    const detached = isDetached(id)
     Menu.buildFromTemplate([
       { label: 'Reload Teams', click: () => reloadProfile(id) },
       { label: 'Edit profile', click: () => event.sender.send('profiles:startEdit', id) },
+      { type: 'separator' },
+      ...(detached
+        ? [
+            {
+              label: 'Return to main window',
+              click: () => {
+                reattachProfile(id)
+                store = { ...store, activeProfileId: id }
+                persist()
+                broadcast()
+                updateWindowTitle()
+              }
+            },
+            {
+              label: 'Focus detached window',
+              click: () => focusDetached(id)
+            }
+          ]
+        : [
+            {
+              label: 'Detach window',
+              click: () => detachProfile(profile)
+            }
+          ]),
       { type: 'separator' },
       { label: 'Delete', click: () => void deleteProfile(id) }
     ]).popup({ window: mainWindow ?? undefined })
@@ -213,7 +289,7 @@ async function deleteProfile(id: string): Promise<ProfileStore> {
   await destroyProfileView(id)
   const profiles = store.profiles.filter((item) => item.id !== id)
   const activeProfileId =
-    store.activeProfileId === id ? (profiles[0]?.id ?? null) : store.activeProfileId
+    store.activeProfileId === id ? (profiles.find((item) => !isDetached(item.id))?.id ?? null) : store.activeProfileId
   store = { ...store, profiles, activeProfileId }
   persist()
 
@@ -234,6 +310,11 @@ async function deleteProfile(id: string): Promise<ProfileStore> {
 async function switchProfile(id: string): Promise<ProfileStore> {
   const profile = store.profiles.find((item) => item.id === id)
   if (!profile) {
+    return store
+  }
+
+  if (isDetached(id)) {
+    focusDetached(id)
     return store
   }
 
@@ -269,6 +350,7 @@ function applySidebarCollapsed(collapsed: boolean): void {
 
 function broadcast(): void {
   mainWindow?.webContents.send('profiles:changed', store)
+  mainWindow?.webContents.send('detached:changed', getDetachedIds())
 }
 
 function updateWindowTitle(): void {
@@ -317,6 +399,16 @@ function buildAppMenu(): Menu {
           label: store.sidebarCollapsed ? 'Show tenant sidebar' : 'Hide tenant sidebar',
           accelerator: 'CmdOrCtrl+B',
           click: () => applySidebarCollapsed(!store.sidebarCollapsed)
+        },
+        {
+          label: 'Detach active tenant',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => {
+            const profile = store.profiles.find((item) => item.id === store.activeProfileId)
+            if (profile && !isDetached(profile.id)) {
+              detachProfile(profile)
+            }
+          }
         },
         { type: 'separator' },
         {

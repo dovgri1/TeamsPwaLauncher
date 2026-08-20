@@ -3,16 +3,24 @@ import {
   Menu,
   WebContentsView,
   app,
-  desktopCapturer,
   session,
   shell,
   type HandlerDetails,
   type Session,
   type WebContents
 } from 'electron'
-import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_WIDTH, type Profile, type UnreadBadge, type UnreadMap } from '../shared/types'
+import icon from '../../resources/icon.png?asset'
+import { pickDisplaySource } from './screenPicker'
+import {
+  SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_WIDTH,
+  type Profile,
+  type UnreadBadge,
+  type UnreadMap
+} from '../shared/types'
 
 const views = new Map<string, WebContentsView>()
+const popouts = new Map<string, BrowserWindow>()
 const configuredSessions = new Set<string>()
 const titleUnread = new Map<string, UnreadBadge>()
 const badgeUnread = new Map<string, number>()
@@ -22,6 +30,8 @@ let activeProfileId: string | null = null
 let onSwitchIndex: ((index: number) => void) | null = null
 let onUnreadChange: ((unread: UnreadMap) => void) | null = null
 let onToggleSidebar: (() => void) | null = null
+let onDetachedChange: ((ids: string[]) => void) | null = null
+let onActiveCleared: (() => void) | null = null
 let unreadPoll: ReturnType<typeof setInterval> | null = null
 let sidebarOffset = SIDEBAR_WIDTH
 
@@ -96,6 +106,14 @@ export function setToggleSidebarHandler(handler: () => void): void {
   onToggleSidebar = handler
 }
 
+export function setDetachedChangeHandler(handler: (ids: string[]) => void): void {
+  onDetachedChange = handler
+}
+
+export function setActiveClearedHandler(handler: () => void): void {
+  onActiveCleared = handler
+}
+
 export function setSidebarCollapsed(collapsed: boolean): void {
   sidebarOffset = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH
   syncActiveBounds()
@@ -105,13 +123,21 @@ export function getUnreadMap(): UnreadMap {
   return publishUnread(false)
 }
 
+export function getDetachedIds(): string[] {
+  return [...popouts.keys()]
+}
+
+export function isDetached(id: string): boolean {
+  return popouts.has(id)
+}
+
 export function initTeamsViews(win: BrowserWindow): void {
   mainWindow = win
   win.on('resize', syncActiveBounds)
   win.on('maximize', syncActiveBounds)
   win.on('unmaximize', syncActiveBounds)
   win.on('enter-html-full-screen', () => {
-    const view = activeView()
+    const view = activeEmbeddedView()
     if (!view) {
       return
     }
@@ -136,14 +162,24 @@ export function showProfile(profile: Profile): void {
     return
   }
 
+  if (popouts.has(profile.id)) {
+    focusDetached(profile.id)
+    return
+  }
+
   let view = views.get(profile.id)
   if (!view) {
     view = createView(profile)
     views.set(profile.id, view)
     mainWindow.contentView.addChildView(view)
+  } else if (!isViewInMain(view)) {
+    mainWindow.contentView.addChildView(view)
   }
 
   for (const [id, existing] of views) {
+    if (popouts.has(id)) {
+      continue
+    }
     existing.setVisible(id === profile.id)
   }
 
@@ -155,8 +191,10 @@ export function showProfile(profile: Profile): void {
 
 export function hideAllViews(): void {
   activeProfileId = null
-  for (const view of views.values()) {
-    view.setVisible(false)
+  for (const [id, view] of views) {
+    if (!popouts.has(id)) {
+      view.setVisible(false)
+    }
   }
 }
 
@@ -165,14 +203,149 @@ export function reloadProfile(id: string): void {
 }
 
 export function toggleActiveDevTools(): void {
-  activeView()?.webContents.toggleDevTools()
+  activeEmbeddedView()?.webContents.toggleDevTools()
+}
+
+export function detachProfile(profile: Profile): void {
+  if (!mainWindow || popouts.has(profile.id)) {
+    focusDetached(profile.id)
+    return
+  }
+
+  let view = views.get(profile.id)
+  if (!view) {
+    view = createView(profile)
+    views.set(profile.id, view)
+    mainWindow.contentView.addChildView(view)
+  }
+
+  mainWindow.contentView.removeChildView(view)
+
+  const popout = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#1B1A19',
+    title: profile.name,
+    ...(process.platform !== 'darwin' ? { icon } : {}),
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  popouts.set(profile.id, popout)
+  popout.contentView.addChildView(view)
+  view.setVisible(true)
+  syncPopoutBounds(profile.id)
+
+  popout.on('resize', () => syncPopoutBounds(profile.id))
+  popout.on('maximize', () => syncPopoutBounds(profile.id))
+  popout.on('unmaximize', () => syncPopoutBounds(profile.id))
+  popout.on('closed', () => {
+    if (!popouts.has(profile.id)) {
+      return
+    }
+    popouts.delete(profile.id)
+    reattachView(profile.id, true)
+    publishDetached()
+  })
+
+  if (activeProfileId === profile.id) {
+    activeProfileId = null
+    onActiveCleared?.()
+  }
+
+  popout.once('ready-to-show', () => {
+    popout.show()
+    popout.focus()
+    view.webContents.focus()
+  })
+  popout.show()
+  publishDetached()
+}
+
+export function focusDetached(id: string): void {
+  const win = popouts.get(id)
+  if (!win || win.isDestroyed()) {
+    return
+  }
+  if (win.isMinimized()) {
+    win.restore()
+  }
+  win.show()
+  win.focus()
+  views.get(id)?.webContents.focus()
+}
+
+export function reattachProfile(id: string): void {
+  const win = popouts.get(id)
+  if (!win) {
+    return
+  }
+  popouts.delete(id)
+  if (!win.isDestroyed()) {
+    win.removeAllListeners('closed')
+    win.close()
+  }
+  reattachView(id, true)
+  publishDetached()
+}
+
+function reattachView(id: string, makeActive: boolean): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  const view = views.get(id)
+  if (!view || view.webContents.isDestroyed()) {
+    return
+  }
+
+  try {
+    mainWindow.contentView.addChildView(view)
+  } catch {
+    // Already attached.
+  }
+
+  if (makeActive) {
+    for (const [otherId, existing] of views) {
+      if (popouts.has(otherId)) {
+        continue
+      }
+      existing.setVisible(otherId === id)
+    }
+    activeProfileId = id
+    view.setVisible(true)
+    syncActiveBounds()
+    view.webContents.focus()
+  } else {
+    view.setVisible(false)
+  }
 }
 
 export async function destroyProfileView(id: string): Promise<void> {
+  const popout = popouts.get(id)
+  if (popout) {
+    popouts.delete(id)
+    if (!popout.isDestroyed()) {
+      popout.removeAllListeners('closed')
+      popout.close()
+    }
+    publishDetached()
+  }
+
   const view = views.get(id)
   if (view) {
     view.setVisible(false)
-    mainWindow?.contentView.removeChildView(view)
+    try {
+      mainWindow?.contentView.removeChildView(view)
+    } catch {
+      // Not in main.
+    }
     if (!view.webContents.isDestroyed()) {
       view.webContents.close()
     }
@@ -217,6 +390,9 @@ export function attachAppWebContentsHandlers(): void {
 
 export function syncBounds(): void {
   syncActiveBounds()
+  for (const id of popouts.keys()) {
+    syncPopoutBounds(id)
+  }
 }
 
 function createView(profile: Profile): WebContentsView {
@@ -253,10 +429,8 @@ function configureSession(ses: Session, profileId: string): void {
   ses.setPermissionCheckHandler((_contents, permission) => isAllowedPermission(permission))
 
   ses.setDisplayMediaRequestHandler((_request, callback) => {
-    void desktopCapturer
-      .getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } })
-      .then((sources) => {
-        const source = sources[0]
+    void pickDisplaySource(mainWindow)
+      .then((source) => {
         if (!source) {
           callback({})
           return
@@ -266,7 +440,10 @@ function configureSession(ses: Session, profileId: string): void {
           audio: 'loopback'
         })
       })
-  }, { useSystemPicker: true })
+      .catch(() => {
+        callback({})
+      })
+  })
 }
 
 function chromeUserAgent(): string {
@@ -375,7 +552,7 @@ function showTeamsContextMenu(contents: WebContents, params: Electron.ContextMen
     { label: 'Reload Teams', click: () => contents.reload() }
   )
 
-  Menu.buildFromTemplate(template).popup({ window: mainWindow ?? undefined })
+  Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined })
 }
 
 function handleShortcut(event: Electron.Event, input: Electron.Input): void {
@@ -399,13 +576,27 @@ function handleShortcut(event: Electron.Event, input: Electron.Input): void {
 
   if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 'r') {
     event.preventDefault()
-    activeView()?.webContents.reload()
+    const focused = BrowserWindow.getFocusedWindow()
+    for (const [id, win] of popouts) {
+      if (win === focused) {
+        views.get(id)?.webContents.reload()
+        return
+      }
+    }
+    activeEmbeddedView()?.webContents.reload()
     return
   }
 
   if (ctrl && input.shift && input.key.toLowerCase() === 'i') {
     event.preventDefault()
-    activeView()?.webContents.toggleDevTools()
+    const focused = BrowserWindow.getFocusedWindow()
+    for (const [id, win] of popouts) {
+      if (win === focused) {
+        views.get(id)?.webContents.toggleDevTools()
+        return
+      }
+    }
+    activeEmbeddedView()?.webContents.toggleDevTools()
     return
   }
 
@@ -415,11 +606,19 @@ function handleShortcut(event: Electron.Event, input: Electron.Input): void {
   }
 }
 
-function activeView(): WebContentsView | undefined {
-  if (!activeProfileId) {
+function activeEmbeddedView(): WebContentsView | undefined {
+  if (!activeProfileId || popouts.has(activeProfileId)) {
     return undefined
   }
   return views.get(activeProfileId)
+}
+
+function isViewInMain(view: WebContentsView): boolean {
+  if (!mainWindow) {
+    return false
+  }
+  const children = mainWindow.contentView.children as WebContentsView[]
+  return children.includes(view)
 }
 
 function syncActiveBounds(): void {
@@ -427,7 +626,7 @@ function syncActiveBounds(): void {
     return
   }
 
-  const view = activeView()
+  const view = activeEmbeddedView()
   if (!view) {
     return
   }
@@ -444,6 +643,20 @@ function syncActiveBounds(): void {
     width: Math.max(0, width - sidebarOffset),
     height
   })
+}
+
+function syncPopoutBounds(id: string): void {
+  const win = popouts.get(id)
+  const view = views.get(id)
+  if (!win || win.isDestroyed() || !view) {
+    return
+  }
+  const [width, height] = win.getContentSize()
+  view.setBounds({ x: 0, y: 0, width, height })
+}
+
+function publishDetached(): void {
+  onDetachedChange?.(getDetachedIds())
 }
 
 function attachUnreadTracking(profileId: string, contents: WebContents): void {

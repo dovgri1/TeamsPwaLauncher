@@ -4,7 +4,16 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {},
-  preload: {},
+  preload: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          screenPicker: resolve('src/preload/screenPicker.ts')
+        }
+      }
+    }
+  },
   renderer: {
     resolve: {
       alias: {

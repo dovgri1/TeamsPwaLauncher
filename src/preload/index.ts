@@ -15,6 +15,12 @@ const teamsLauncher = {
   deleteProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:delete', id),
   switchProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:switch', id),
   reloadProfile: (id: string): Promise<ProfileStore> => ipcRenderer.invoke('profiles:reload', id),
+  detachProfile: (id: string): Promise<{ store: ProfileStore; detachedIds: string[] }> =>
+    ipcRenderer.invoke('profiles:detach', id),
+  reattachProfile: (id: string): Promise<{ store: ProfileStore; detachedIds: string[] }> =>
+    ipcRenderer.invoke('profiles:reattach', id),
+  focusDetached: (id: string): Promise<string[]> => ipcRenderer.invoke('profiles:focusDetached', id),
+  listDetached: (): Promise<string[]> => ipcRenderer.invoke('detached:list'),
   listUnread: (): Promise<UnreadMap> => ipcRenderer.invoke('unread:list'),
   setSidebarCollapsed: (collapsed: boolean): Promise<ProfileStore> =>
     ipcRenderer.invoke('ui:setSidebarCollapsed', collapsed),
@@ -37,6 +43,15 @@ const teamsLauncher = {
     ipcRenderer.on('unread:changed', listener)
     return () => {
       ipcRenderer.removeListener('unread:changed', listener)
+    }
+  },
+  onDetached: (callback: (ids: string[]) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, ids: string[]): void => {
+      callback(ids)
+    }
+    ipcRenderer.on('detached:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('detached:changed', listener)
     }
   },
   onStartEdit: (callback: (id: string) => void): (() => void) => {

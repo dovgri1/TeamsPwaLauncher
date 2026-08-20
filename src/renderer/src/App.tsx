@@ -16,6 +16,7 @@ const emptyStore: ProfileStore = { profiles: [], activeProfileId: null, sidebarC
 export default function App(): JSX.Element {
   const [store, setStore] = useState<ProfileStore>(emptyStore)
   const [unread, setUnread] = useState<UnreadMap>({})
+  const [detachedIds, setDetachedIds] = useState<string[]>([])
   const [formMode, setFormMode] = useState<'hidden' | 'add' | 'edit'>('hidden')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -30,11 +31,14 @@ export default function App(): JSX.Element {
       }
     })
     void window.teamsLauncher.listUnread().then(setUnread)
+    void window.teamsLauncher.listDetached().then(setDetachedIds)
     const stopChanged = window.teamsLauncher.onChanged(setStore)
     const stopUnread = window.teamsLauncher.onUnread(setUnread)
+    const stopDetached = window.teamsLauncher.onDetached(setDetachedIds)
     return () => {
       stopChanged()
       stopUnread()
+      stopDetached()
     }
   }, [])
 
@@ -149,7 +153,8 @@ export default function App(): JSX.Element {
               key={profile.id}
               profile={profile}
               index={index}
-              active={profile.id === store.activeProfileId}
+              active={profile.id === store.activeProfileId && !detachedIds.includes(profile.id)}
+              detached={detachedIds.includes(profile.id)}
               unread={unread[profile.id]}
               onSelect={() => void window.teamsLauncher.switchProfile(profile.id)}
               onContextMenu={(event) => {
@@ -157,6 +162,7 @@ export default function App(): JSX.Element {
                 window.teamsLauncher.openContextMenu(profile.id)
               }}
               onStartEdit={() => openEdit(profile)}
+              onDetach={() => void window.teamsLauncher.detachProfile(profile.id)}
             />
           ))}
 
@@ -239,7 +245,7 @@ export default function App(): JSX.Element {
 
         <footer className="sidebar-footer">
           <span>Ctrl+1–9 switch</span>
-          <span>Ctrl+B hide</span>
+          <span>Ctrl+Shift+D detach</span>
         </footer>
           </>
         ) : null}
@@ -266,27 +272,38 @@ function ProfileRow({
   profile,
   index,
   active,
+  detached,
   unread,
   onSelect,
   onContextMenu,
-  onStartEdit
+  onStartEdit,
+  onDetach
 }: {
   profile: Profile
   index: number
   active: boolean
+  detached: boolean
   unread?: UnreadBadge
   onSelect: () => void
   onContextMenu: (event: MouseEvent) => void
   onStartEdit: () => void
+  onDetach: () => void
 }): JSX.Element {
   const letter = profile.name.trim().charAt(0).toUpperCase() || 'T'
   const badgeLabel = formatUnread(unread)
+  const rowClass = [
+    'profile-row',
+    active ? 'active' : '',
+    detached ? 'detached' : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div
       role="button"
       tabIndex={0}
-      className={active ? 'profile-row active' : 'profile-row'}
+      className={rowClass}
       onClick={onSelect}
       onContextMenu={onContextMenu}
       onDoubleClick={(event) => {
@@ -308,8 +325,24 @@ function ProfileRow({
       </span>
       <span className="profile-meta">
         <span className="profile-name">{profile.name}</span>
-        {index < 9 ? <span className="profile-shortcut">Ctrl+{index + 1}</span> : null}
+        <span className="profile-shortcut">
+          {detached ? 'Detached' : index < 9 ? `Ctrl+${index + 1}` : null}
+        </span>
       </span>
+      {!detached ? (
+        <button
+          type="button"
+          className="detach-button"
+          title="Detach window"
+          aria-label={`Detach ${profile.name}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDetach()
+          }}
+        >
+          ↗
+        </button>
+      ) : null}
     </div>
   )
 }

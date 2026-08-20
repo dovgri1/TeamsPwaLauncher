@@ -153,6 +153,33 @@ input {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.profile-row.detached {
+  opacity: 0.92;
+}
+
+.profile-row.detached .profile-shortcut {
+  color: var(--accent);
+}
+
+.detach-button {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.detach-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
 .avatar-wrap {
   position: relative;
   flex-shrink: 0;
@@ -196,6 +223,7 @@ input {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  flex: 1;
 }
 
 .profile-name {

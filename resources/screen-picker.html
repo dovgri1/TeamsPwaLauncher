@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Choose what to share</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #1b1a19;
+        --panel: #252423;
+        --text: #f5f5f4;
+        --muted: #c8c6c4;
+        --accent: #6264a7;
+        --border: #3b3a39;
+        font-family: 'Segoe UI', Ubuntu, Cantarell, system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        padding: 16px 18px 8px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 650;
+      }
+      p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .sections {
+        flex: 1;
+        overflow: auto;
+        padding: 8px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        font-weight: 650;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 10px;
+      }
+      .card {
+        border: 2px solid var(--border);
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 8px;
+        cursor: pointer;
+        text-align: left;
+        color: inherit;
+      }
+      .card:hover,
+      .card:focus-visible {
+        border-color: var(--accent);
+        outline: none;
+      }
+      .card.selected {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
+      }
+      .thumb {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        border-radius: 6px;
+        background: #111;
+        display: block;
+      }
+      .name {
+        margin-top: 8px;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 18px 16px;
+        border-top: 1px solid var(--border);
+      }
+      button.action {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font: inherit;
+      }
+      .cancel {
+        background: transparent;
+        color: var(--muted);
+      }
+      .share {
+        background: var(--accent);
+        color: #fff;
+      }
+      .share:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Choose what to share</h1>
+      <p>Pick a screen or window. Teams will share only that source.</p>
+    </header>
+    <div class="sections" id="sections"></div>
+    <footer>
+      <button type="button" class="action cancel" id="cancel">Cancel</button>
+      <button type="button" class="action share" id="share" disabled>Share</button>
+    </footer>
+    <script>
+      const sections = document.getElementById('sections')
+      const shareBtn = document.getElementById('share')
+      const cancelBtn = document.getElementById('cancel')
+      let selectedId = null
+
+      function render(sources) {
+        const screens = sources.filter((s) => s.kind === 'screen')
+        const windows = sources.filter((s) => s.kind === 'window')
+        sections.innerHTML = ''
+        appendGroup('Screens', screens)
+        appendGroup('Windows', windows)
+        if (sources.length === 0) {
+          sections.innerHTML = '<p class="empty">No shareable sources were found.</p>'
+        }
+      }
+
+      function appendGroup(title, items) {
+        if (items.length === 0) return
+        const wrap = document.createElement('section')
+        const heading = document.createElement('h2')
+        heading.textContent = title
+        const grid = document.createElement('div')
+        grid.className = 'grid'
+        for (const item of items) {
+          const card = document.createElement('button')
+          card.type = 'button'
+          card.className = 'card'
+          card.dataset.id = item.id
+          card.innerHTML =
+            '<img class="thumb" alt="" />' +
+            '<div class="name"></div>'
+          card.querySelector('img').src = item.thumbnail
+          card.querySelector('.name').textContent = item.name
+          card.addEventListener('click', () => {
+            selectedId = item.id
+            for (const el of document.querySelectorAll('.card')) {
+              el.classList.toggle('selected', el.dataset.id === selectedId)
+            }
+            shareBtn.disabled = false
+          })
+          card.addEventListener('dblclick', () => {
+            selectedId = item.id
+            void window.screenPicker.select(item.id)
+          })
+          grid.appendChild(card)
+        }
+        wrap.appendChild(heading)
+        wrap.appendChild(grid)
+        sections.appendChild(wrap)
+      }
+
+      cancelBtn.addEventListener('click', () => void window.screenPicker.cancel())
+      shareBtn.addEventListener('click', () => {
+        if (selectedId) void window.screenPicker.select(selectedId)
+      })
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') void window.screenPicker.cancel()
+        if (event.key === 'Enter' && selectedId) void window.screenPicker.select(selectedId)
+      })
+
+      void window.screenPicker.list().then(render)
+    </script>
+  </body>
+</html>
