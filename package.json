@@ -2,7 +2,7 @@
   "name": "teams-pwa-launcher",
   "productName": "Teams PWA Launcher",
   "desktopName": "teams-pwa-launcher.desktop",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Switch between multiple Microsoft Teams web profiles in one desktop app",
   "main": "./out/main/index.js",
   "author": "Dovydas Grigaitis",
