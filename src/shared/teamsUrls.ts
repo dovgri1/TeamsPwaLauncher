@@ -14,6 +14,7 @@ const ALLOWED_HOSTS = [
   /(?:^|\.)sharepoint\.com$/i,
   /(?:^|\.)sharepointonline\.com$/i,
   /(?:^|\.)cloud\.microsoft$/i,
+  /(?:^|\.)static\.microsoft$/i,
   /(?:^|\.)microsoft365\.com$/i,
   /(?:^|\.)skype\.com$/i,
   /(?:^|\.)svc\.ms$/i,
@@ -59,6 +60,17 @@ export function isSafeExternalUrl(url: string): boolean {
     return false
   }
   return parsed.protocol === 'https:' || parsed.protocol === 'mailto:' || parsed.protocol === 'tel:'
+}
+
+/** Hidden Teams probes (third-party cookie check). Must not open in the OS browser. */
+export function isTeamsDiagnosticsUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  return /report-third-party-cookies/i.test(parsed.pathname)
 }
 
 export function sanitizeProfileUrl(url?: string): string {

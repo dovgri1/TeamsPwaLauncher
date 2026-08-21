@@ -27,7 +27,9 @@ import {
   showProfile,
   syncBounds,
   toggleActiveDevTools,
-  chromeUserAgent
+  chromeUserAgent,
+  switchAccount,
+  flushProfileSessions
 } from './teamsView'
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
 import { sanitizeProfileUrl } from '../shared/teamsUrls'
@@ -136,6 +138,18 @@ app.on('window-all-closed', () => {
   }
 })
 
+let flushingForQuit = false
+app.on('before-quit', (event) => {
+  if (flushingForQuit) {
+    return
+  }
+  event.preventDefault()
+  flushingForQuit = true
+  void flushProfileSessions(store.profiles.map((profile) => profile.id)).finally(() => {
+    app.quit()
+  })
+})
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -241,6 +255,7 @@ function registerIpc(): void {
     const detached = isDetached(id)
     Menu.buildFromTemplate([
       { label: 'Reload Teams', click: () => reloadProfile(id) },
+      { label: 'Switch account…', click: () => switchAccount(profile) },
       { label: 'Clear session…', click: () => void clearSession(id) },
       { label: 'Edit profile', click: () => event.sender.send('profiles:startEdit', id) },
       { type: 'separator' },
@@ -491,6 +506,15 @@ function buildAppMenu(): Menu {
           click: () => {
             if (store.activeProfileId) {
               reloadProfile(store.activeProfileId)
+            }
+          }
+        },
+        {
+          label: 'Switch account…',
+          click: () => {
+            const profile = store.profiles.find((item) => item.id === store.activeProfileId)
+            if (profile) {
+              switchAccount(profile)
             }
           }
         },

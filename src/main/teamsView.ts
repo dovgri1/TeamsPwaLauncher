@@ -7,7 +7,8 @@ import {
   shell,
   type HandlerDetails,
   type Session,
-  type WebContents
+  type WebContents,
+  type CookiesSetDetails
 } from 'electron'
 import icon from '../../resources/icon.png?asset'
 import { pickDisplaySource } from './screenPicker'
@@ -18,7 +19,7 @@ import {
   type UnreadBadge,
   type UnreadMap
 } from '../shared/types'
-import { isAllowedTeamsUrl, isSafeExternalUrl, sanitizeProfileUrl } from '../shared/teamsUrls'
+import { isAllowedTeamsUrl, isSafeExternalUrl, isTeamsDiagnosticsUrl, sanitizeProfileUrl } from '../shared/teamsUrls'
 
 const views = new Map<string, WebContentsView>()
 const popouts = new Map<string, BrowserWindow>()
@@ -422,6 +423,15 @@ export function attachAppWebContentsHandlers(): void {
       win.on('unmaximize', ping)
       win.on('enter-full-screen', ping)
       win.on('leave-full-screen', ping)
+      win.webContents.once('did-finish-load', () => {
+        if (isTeamsDiagnosticsUrl(win.webContents.getURL()) && !win.isDestroyed()) {
+          setTimeout(() => {
+            if (!win.isDestroyed()) {
+              win.close()
+            }
+          }, 8000)
+        }
+      })
     })
     attachSignInHelpers(contents)
   })
@@ -482,7 +492,15 @@ function createView(profile: Profile): WebContentsView {
   attachUnreadTracking(profile.id, view.webContents)
   attachLoginRecovery(view.webContents, profile)
   view.setVisible(false)
-  void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
+  void (async () => {
+    const pickAccount = await partitionHasNoCookies(profile.id)
+    if (view.webContents.isDestroyed()) {
+      return
+    }
+    void view.webContents.loadURL(
+      teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount })
+    )
+  })()
   return view
 }
 
@@ -528,16 +546,101 @@ function configureSession(ses: Session, profileId: string): void {
         callback({})
       })
   })
+
+  attachSessionCookiePersistence(ses)
 }
 
-/** Start Teams with account picker instead of a silent/personal-account shortcut. */
-function teamsEntryUrl(url: string): string {
+const SESSION_COOKIE_TTL_SEC = 14 * 24 * 60 * 60
+const PERSIST_SESSION_COOKIE_HOSTS = [
+  /(?:^|\.)login\.microsoftonline\.com$/i,
+  /(?:^|\.)microsoftonline\.com$/i,
+  /(?:^|\.)teams\.microsoft\.com$/i,
+  /(?:^|\.)login\.microsoft\.com$/i,
+  /(?:^|\.)login\.live\.com$/i,
+  /(?:^|\.)login\.windows\.net$/i
+]
+
+function attachSessionCookiePersistence(ses: Session): void {
+  const rewriting = new Set<string>()
+  ses.cookies.on('changed', (_event, cookie, _cause, removed) => {
+    if (removed || !cookie.session) {
+      return
+    }
+    const host = (cookie.domain ?? '').replace(/^\./, '')
+    if (!PERSIST_SESSION_COOKIE_HOSTS.some((pattern) => pattern.test(host))) {
+      return
+    }
+    const key = `${cookie.domain}|${cookie.path}|${cookie.name}|${cookie.secure}|${cookie.httpOnly}`
+    if (rewriting.has(key)) {
+      return
+    }
+    rewriting.add(key)
+    const url = cookieSetUrl(cookie)
+    const details: CookiesSetDetails = {
+      url,
+      name: cookie.name,
+      value: cookie.value,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      expirationDate: Math.floor(Date.now() / 1000) + SESSION_COOKIE_TTL_SEC,
+      sameSite: cookie.sameSite
+    }
+    if (!cookie.hostOnly && cookie.domain) {
+      details.domain = cookie.domain
+    }
+    void ses.cookies
+      .set(details)
+      .catch(() => undefined)
+      .finally(() => {
+        rewriting.delete(key)
+      })
+  })
+}
+
+function cookieSetUrl(cookie: Electron.Cookie): string {
+  const host = (cookie.domain ?? 'localhost').replace(/^\./, '')
+  const protocol = cookie.secure ? 'https' : 'http'
+  const path = cookie.path || '/'
+  return `${protocol}://${host}${path}`
+}
+
+async function partitionHasNoCookies(id: string): Promise<boolean> {
+  const cookies = await session.fromPartition(`persist:${id}`).cookies.get({})
+  return cookies.length === 0
+}
+
+export function switchAccount(profile: Profile): void {
+  showProfile(profile)
+  const view = views.get(profile.id)
+  if (!view || view.webContents.isDestroyed()) {
+    return
+  }
+  void view.webContents.loadURL(
+    teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount: true })
+  )
+}
+
+export async function flushProfileSessions(ids: string[]): Promise<void> {
+  const unique = new Set([...ids, ...configuredSessions, ...views.keys()])
+  await Promise.all(
+    [...unique].map((id) =>
+      session
+        .fromPartition(`persist:${id}`)
+        .cookies.flushStore()
+        .catch(() => undefined)
+    )
+  )
+}
+
+/** Load Teams. Only force the account picker on first run (empty partition) or Switch account. */
+function teamsEntryUrl(url: string, options?: { pickAccount?: boolean }): string {
   try {
     const parsed = new URL(url)
     if (!/(?:^|\.)teams\.microsoft\.com$/i.test(parsed.hostname)) {
       return url
     }
-    if (!parsed.searchParams.has('prompt')) {
+    if (options?.pickAccount) {
       parsed.searchParams.set('prompt', 'select_account')
     }
     return parsed.toString()
@@ -689,6 +792,24 @@ function handleWindowOpen(
   action: 'allow' | 'deny'
   overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
 } {
+  if (isTeamsDiagnosticsUrl(details.url)) {
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        show: false,
+        width: 1,
+        height: 1,
+        skipTaskbar: true,
+        webPreferences: {
+          session: contents.session,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false
+        }
+      }
+    }
+  }
+
   if (isAllowedTeamsUrl(details.url) || details.url === 'about:blank' || details.url.startsWith('about:blank?')) {
     return {
       action: 'allow',

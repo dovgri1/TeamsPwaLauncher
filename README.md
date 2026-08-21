@@ -33,7 +33,7 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 2. Install it:
 
 ```bash
-sudo apt install ./teams-pwa-launcher-1.1.1.deb
+sudo apt install ./teams-pwa-launcher-1.1.3.deb
 ```
 
 3. Open **Teams PWA Launcher** from your application menu.
@@ -50,8 +50,8 @@ sudo apt remove teams-pwa-launcher
 2. Make it executable and run:
 
 ```bash
-chmod +x teams-pwa-launcher-1.1.1.AppImage
-./teams-pwa-launcher-1.1.1.AppImage
+chmod +x teams-pwa-launcher-1.1.3.AppImage
+./teams-pwa-launcher-1.1.3.AppImage
 ```
 
 ### Build from source (Linux)
@@ -63,7 +63,7 @@ git clone https://github.com/dovgri1/TeamsPwaLauncher.git
 cd TeamsPwaLauncher
 npm install
 npm run build:linux
-sudo apt install ./dist/teams-pwa-launcher-1.1.1.deb
+sudo apt install ./dist/teams-pwa-launcher-1.1.3.deb
 ```
 
 Screen sharing on Linux uses PipeWire (`xdg-desktop-portal`). Camera and microphone prompts are allowed for Teams calls.
@@ -94,8 +94,8 @@ npm run build:win
 
 Artifacts appear under `dist\`:
 
-- `teams-pwa-launcher-1.1.1-setup.exe` — installer  
-- `teams-pwa-launcher-1.1.1-portable.exe` — portable  
+- `teams-pwa-launcher-1.1.3-setup.exe` — installer  
+- `teams-pwa-launcher-1.1.3-portable.exe` — portable  
 
 Building a Windows installer from Linux is possible with Wine, but building on Windows is more reliable.
 
@@ -128,7 +128,7 @@ npm run build:mac
 
 Artifacts appear under `dist/`:
 
-- `teams-pwa-launcher-1.1.1-arm64.dmg` / `teams-pwa-launcher-1.1.1-x64.dmg`
+- `teams-pwa-launcher-1.1.3-arm64.dmg` / `teams-pwa-launcher-1.1.3-x64.dmg`
 - matching `.zip` archives
 
 Notarization needs an Apple Developer ID. GitHub Actions tags (`v*`) run the same Mac build automatically.
@@ -164,6 +164,12 @@ When Teams asks to share your screen, a picker lists your **screens** and **wind
 
 **Clear session** (right-click a profile, or **View → Clear session for active profile**) signs that tenant out and wipes its cookies and local Teams data, then reloads a fresh sign-in page. Use this when a login is stuck (e.g. AADSTS errors). The profile itself stays in the sidebar.
 
+**Switch account** (right-click a profile, or **View → Switch account**) opens Microsoft’s account picker in that profile without wiping the session. Use this to pick a different account in the same tenant slot.
+
+Logins are **not** stored as passwords. Each profile keeps Microsoft’s own cookies and tokens in its Chromium partition (`persist:<id>`). After you sign in once, the app flushes those cookies on quit and keeps short-lived “session” cookies for about 14 days so you usually do not retype the password on the next launch.
+
+Your tenant can still require a password or MFA on a schedule (Conditional Access / sign-in frequency). The app cannot bypass that. A new profile, another computer, or **Clear session** always means a full sign-in.
+
 Deleting a profile also clears that profile’s cookies and local Teams data, and removes it from the list.
 
 Sign-in prefers **work or school** accounts (email entry). Windows personal Microsoft account shortcuts are steered away so you can type the tenant email normally.
@@ -193,11 +199,14 @@ Profiles, preferences, and Teams session data live outside the install folder:
 
 Reinstalling the app does **not** remove this folder. Delete it yourself only if you want a full reset (including all saved logins).
 
+The app does **not** save Microsoft account passwords. Stay-signed-in comes from cookies and tokens already in that folder. `profiles.json` only stores names, colors, and icons.
+
 ## Privacy & security
 
-- Logins stay on your machine in isolated browser partitions.  
+- Logins stay on your machine in isolated browser partitions (cookies and tokens, not stored passwords).  
 - The app does not send your Teams data to a third-party server.  
 - You sign in through Microsoft’s own sign-in pages, same as Teams in a normal browser.  
+- Tenant policies (MFA, Conditional Access, sign-in frequency) still apply; this app cannot skip them.  
 - Navigation is limited to known Microsoft / Teams hosts; other links open in your system browser over `https` only.  
 - Profile entry URLs are validated so partitions cannot be pointed at arbitrary sites.
 
