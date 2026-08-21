@@ -402,9 +402,6 @@ export function attachAppWebContentsHandlers(): void {
     contents.on('will-redirect', (event, url) => {
       handleNavigation(event, contents, url)
     })
-    contents.on('will-frame-navigate', (event) => {
-      handleNavigation(event, contents, event.url)
-    })
     contents.on('context-menu', (_event, params) => {
       if (contents === mainWindow?.webContents) {
         return
@@ -433,15 +430,6 @@ function handleNavigation(
   url: string
 ): void {
   if (isAppRendererUrl(contents, url)) {
-    return
-  }
-  if (
-    url === 'about:blank' ||
-    url.startsWith('about:blank?') ||
-    url.startsWith('about:blank#') ||
-    url.startsWith('blob:') ||
-    url.startsWith('data:')
-  ) {
     return
   }
   if (isAllowedTeamsUrl(url)) {
@@ -493,20 +481,6 @@ function configureSession(ses: Session, profileId: string): void {
   configuredSessions.add(profileId)
 
   ses.setUserAgent(chromeUserAgent())
-  ses.webRequest.onBeforeSendHeaders((details, callback) => {
-    const chromeMajor = process.versions.chrome.split('.')[0]
-    const platformHint =
-      process.platform === 'darwin' ? '"macOS"' : process.platform === 'win32' ? '"Windows"' : '"Linux"'
-    callback({
-      requestHeaders: {
-        ...details.requestHeaders,
-        'User-Agent': chromeUserAgent(),
-        'Sec-CH-UA': `"Google Chrome";v="${chromeMajor}", "Chromium";v="${chromeMajor}", "Not.A/Brand";v="24"`,
-        'Sec-CH-UA-Mobile': '?0',
-        'Sec-CH-UA-Platform': platformHint
-      }
-    })
-  })
   ses.setPermissionRequestHandler((_contents, permission, callback) => {
     callback(isAllowedPermission(permission))
   })
@@ -539,9 +513,6 @@ function teamsEntryUrl(url: string): string {
     }
     if (!parsed.searchParams.has('prompt')) {
       parsed.searchParams.set('prompt', 'select_account')
-    }
-    if (parsed.pathname === '/' || parsed.pathname === '') {
-      parsed.pathname = '/v2/'
     }
     return parsed.toString()
   } catch {
@@ -639,21 +610,6 @@ function attachSignInHelpers(contents: WebContents): void {
 
 function attachLoginRecovery(contents: WebContents, profile: Profile): void {
   let recoveries = 0
-  const recover = (): void => {
-    if (contents.isDestroyed() || recoveries >= 2) {
-      return
-    }
-    recoveries += 1
-    void contents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
-  }
-
-  contents.on('did-fail-load', (_event, errorCode, _description, _url, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3) {
-      return
-    }
-    recover()
-  })
-
   contents.on('did-finish-load', () => {
     if (contents.isDestroyed() || recoveries >= 2) {
       return
@@ -663,41 +619,17 @@ function attachLoginRecovery(contents: WebContents, profile: Profile): void {
         `Boolean(document.body && /AADSTS900561/i.test(document.body.innerText || ''))`
       )
       .then((stuck: unknown) => {
-        if (stuck === true) {
-          recover()
+        if (stuck !== true || contents.isDestroyed() || recoveries >= 2) {
+          return
         }
+        recoveries += 1
+        void contents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
       })
       .catch(() => undefined)
-
-    setTimeout(() => {
-      if (contents.isDestroyed() || recoveries >= 2) {
-        return
-      }
-      void contents
-        .executeJavaScript(
-          `(() => {
-            const text = (document.body && document.body.innerText) || ''
-            const hasLogin =
-              /sign in/i.test(text) ||
-              /enter your email/i.test(text) ||
-              document.querySelector('input[type="email"], input[name="loginfmt"]')
-            const splash =
-              /loading microsoft teams/i.test(text) ||
-              Boolean(document.querySelector('[class*="splash"], [class*="loading-screen"]'))
-            return splash && !hasLogin && !text.includes('@')
-          })()`
-        )
-        .then((stuck: unknown) => {
-          if (stuck === true) {
-            recover()
-          }
-        })
-        .catch(() => undefined)
-    }, 12000)
   })
 }
 
-export function chromeUserAgent(): string {
+function chromeUserAgent(): string {
   const chrome = process.versions.chrome
   if (process.platform === 'win32') {
     return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`

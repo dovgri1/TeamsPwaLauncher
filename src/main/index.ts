@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu, app, dialog, ipcMain } from 'electron'
+import { BrowserWindow, Menu, app, dialog, ipcMain, systemPreferences } from 'electron'
 import { join } from 'path'
 import { electronApp, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -26,8 +26,7 @@ import {
   setUnreadHandler,
   showProfile,
   syncBounds,
-  toggleActiveDevTools,
-  chromeUserAgent
+  toggleActiveDevTools
 } from './teamsView'
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
 import { sanitizeProfileUrl } from '../shared/teamsUrls'
@@ -38,25 +37,14 @@ let unread: UnreadMap = {}
 let detachedIds: string[] = []
 
 app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
-
-const disabledFeatures = [
-  'ThirdPartyStoragePartitioning',
-  'UserAgentClientHint',
-  'WebAuthentication',
-  'WebAuthenticationConditionalUI'
-]
-app.commandLine.appendSwitch('disable-features', disabledFeatures.join(','))
-app.commandLine.appendSwitch('disable-renderer-backgrounding')
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
-app.commandLine.appendSwitch('disable-background-timer-throttling')
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+  // Linux Electron never shows the OS passkey/PIN window, so Microsoft login hangs.
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'WebAuthentication,WebAuthenticationConditionalUI'
+  )
 }
-// Remote Mac desktops (and some local GPUs) leave Teams on the splash logo forever.
-if (process.platform === 'darwin' && process.env.TEAMS_LAUNCHER_GPU !== '1') {
-  app.disableHardwareAcceleration()
-}
-app.userAgentFallback = chromeUserAgent()
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -109,6 +97,10 @@ app.whenReady().then(() => {
   })
   registerIpc()
   applyAppMenu()
+  if (process.platform === 'darwin') {
+    void systemPreferences.askForMediaAccess('camera')
+    void systemPreferences.askForMediaAccess('microphone')
+  }
   createWindow()
   restoreActiveProfile()
 

@@ -23,17 +23,7 @@ const ALLOWED_HOSTS = [
   /(?:^|\.)dynamics\.com$/i,
   /(?:^|\.)dynamics365\.com$/i,
   /(?:^|\.)powerapps\.com$/i,
-  /(?:^|\.)powerplatform\.com$/i,
-  /(?:^|\.)windows\.net$/i,
-  /(?:^|\.)microsoftazuread-sso\.com$/i,
-  /(?:^|\.)msidentity\.com$/i,
-  /(?:^|\.)microsoftonline\.us$/i,
-  /(?:^|\.)azureedge\.net$/i,
-  /(?:^|\.)msecnd\.net$/i,
-  /(?:^|\.)azure\.net$/i,
-  /(?:^|\.)azure\.com$/i,
-  /(?:^|\.)akamaized\.net$/i,
-  /(?:^|\.)akamaihd\.net$/i
+  /(?:^|\.)powerplatform\.com$/i
 ]
 
 export function isAllowedTeamsUrl(url: string): boolean {
@@ -44,7 +34,7 @@ export function isAllowedTeamsUrl(url: string): boolean {
     return false
   }
 
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'wss:') {
+  if (parsed.protocol !== 'https:') {
     return false
   }
 
