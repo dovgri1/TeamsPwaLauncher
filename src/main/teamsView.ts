@@ -402,6 +402,9 @@ export function attachAppWebContentsHandlers(): void {
     contents.on('will-redirect', (event, url) => {
       handleNavigation(event, contents, url)
     })
+    contents.on('will-frame-navigate', (event) => {
+      handleNavigation(event, contents, event.url)
+    })
     contents.on('context-menu', (_event, params) => {
       if (contents === mainWindow?.webContents) {
         return
@@ -430,6 +433,15 @@ function handleNavigation(
   url: string
 ): void {
   if (isAppRendererUrl(contents, url)) {
+    return
+  }
+  if (
+    url === 'about:blank' ||
+    url.startsWith('about:blank?') ||
+    url.startsWith('about:blank#') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:')
+  ) {
     return
   }
   if (isAllowedTeamsUrl(url)) {
@@ -481,6 +493,20 @@ function configureSession(ses: Session, profileId: string): void {
   configuredSessions.add(profileId)
 
   ses.setUserAgent(chromeUserAgent())
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    const chromeMajor = process.versions.chrome.split('.')[0]
+    const platformHint =
+      process.platform === 'darwin' ? '"macOS"' : process.platform === 'win32' ? '"Windows"' : '"Linux"'
+    callback({
+      requestHeaders: {
+        ...details.requestHeaders,
+        'User-Agent': chromeUserAgent(),
+        'Sec-CH-UA': `"Google Chrome";v="${chromeMajor}", "Chromium";v="${chromeMajor}", "Not.A/Brand";v="24"`,
+        'Sec-CH-UA-Mobile': '?0',
+        'Sec-CH-UA-Platform': platformHint
+      }
+    })
+  })
   ses.setPermissionRequestHandler((_contents, permission, callback) => {
     callback(isAllowedPermission(permission))
   })
@@ -629,7 +655,7 @@ function attachLoginRecovery(contents: WebContents, profile: Profile): void {
   })
 }
 
-function chromeUserAgent(): string {
+export function chromeUserAgent(): string {
   const chrome = process.versions.chrome
   if (process.platform === 'win32') {
     return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`
