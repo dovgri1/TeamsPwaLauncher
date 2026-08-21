@@ -30,6 +30,29 @@ nsis:
   artifactName: ${name}-${version}-setup.${ext}
 portable:
   artifactName: ${name}-${version}-portable.${ext}
+mac:
+  category: public.app-category.business
+  icon: icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  artifactName: ${name}-${version}-${arch}.${ext}
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  extendInfo:
+    NSCameraUsageDescription: Teams PWA Launcher uses the camera for Microsoft Teams calls.
+    NSMicrophoneUsageDescription: Teams PWA Launcher uses the microphone for Microsoft Teams calls.
+    NSAudioCaptureUsageDescription: Teams PWA Launcher captures audio for Microsoft Teams calls.
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage

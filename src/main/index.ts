@@ -1,4 +1,4 @@
-import { BrowserWindow, Menu, app, dialog, ipcMain } from 'electron'
+import { BrowserWindow, Menu, app, dialog, ipcMain, systemPreferences } from 'electron'
 import { join } from 'path'
 import { electronApp, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -39,12 +39,12 @@ let detachedIds: string[] = []
 app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
+  // Linux Electron never shows the OS passkey/PIN window, so Microsoft login hangs.
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'WebAuthentication,WebAuthenticationConditionalUI'
+  )
 }
-// Linux Electron never shows the OS passkey/PIN window, so Microsoft login hangs.
-app.commandLine.appendSwitch(
-  'disable-features',
-  'WebAuthentication,WebAuthenticationConditionalUI'
-)
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -96,6 +96,11 @@ app.whenReady().then(() => {
     updateWindowTitle()
   })
   registerIpc()
+  applyAppMenu()
+  if (process.platform === 'darwin') {
+    void systemPreferences.askForMediaAccess('camera')
+    void systemPreferences.askForMediaAccess('microphone')
+  }
   createWindow()
   restoreActiveProfile()
 
@@ -131,7 +136,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    autoHideMenuBar: true,
+    autoHideMenuBar: process.platform !== 'darwin',
     backgroundColor: '#201F1E',
     title: 'Teams PWA Launcher',
     ...(process.platform !== 'darwin' ? { icon } : {}),
@@ -144,7 +149,7 @@ function createWindow(): void {
   })
 
   initTeamsViews(mainWindow)
-  mainWindow.setMenu(buildAppMenu())
+  applyAppMenu()
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -404,7 +409,7 @@ function applySidebarCollapsed(collapsed: boolean): void {
   persist()
   setSidebarCollapsed(collapsed)
   broadcast()
-  mainWindow?.setMenu(buildAppMenu())
+  applyAppMenu()
 }
 
 function broadcast(): void {
@@ -424,12 +429,40 @@ function updateWindowTitle(): void {
   mainWindow.setTitle(`${countLabel}${profile.name}`)
 }
 
+function applyAppMenu(): void {
+  const menu = buildAppMenu()
+  Menu.setApplicationMenu(menu)
+  if (process.platform !== 'darwin') {
+    mainWindow?.setMenu(menu)
+  }
+}
+
 function buildAppMenu(): Menu {
-  return Menu.buildFromTemplate([
-    {
-      label: 'File',
-      submenu: [{ role: 'quit' }]
-    },
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' }
+            ]
+          } satisfies Electron.MenuItemConstructorOptions
+        ]
+      : [
+          {
+            label: 'File',
+            submenu: [{ role: 'quit' }]
+          } satisfies Electron.MenuItemConstructorOptions
+        ]),
     {
       label: 'Edit',
       submenu: [
@@ -483,8 +516,18 @@ function buildAppMenu(): Menu {
           accelerator: 'CmdOrCtrl+Shift+I',
           click: () => toggleActiveDevTools()
         },
-        { role: 'toggleDevTools', label: 'Toggle Sidebar DevTools', accelerator: 'F12' }
+        { role: 'toggleDevTools', label: 'Toggle Sidebar DevTools', accelerator: 'F12' },
+        { role: 'togglefullscreen' }
       ]
-    }
-  ])
+    },
+    ...(isMac
+      ? [
+          {
+            role: 'windowMenu'
+          } satisfies Electron.MenuItemConstructorOptions
+        ]
+      : [])
+  ]
+
+  return Menu.buildFromTemplate(template)
 }

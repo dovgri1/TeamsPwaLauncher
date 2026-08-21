@@ -1,4 +1,4 @@
-import { BrowserWindow, desktopCapturer, ipcMain, type DesktopCapturerSource } from 'electron'
+import { BrowserWindow, desktopCapturer, dialog, ipcMain, shell, systemPreferences, type DesktopCapturerSource, type MessageBoxOptions } from 'electron'
 import { join } from 'path'
 import pickerHtml from '../../resources/screen-picker.html?asset'
 
@@ -20,6 +20,10 @@ export async function pickDisplaySource(
   pickerBusy = true
 
   try {
+    if (!(await ensureMacScreenPermission(parent))) {
+      return null
+    }
+
     const sources = await desktopCapturer.getSources({
       types: ['screen', 'window'],
       thumbnailSize: { width: 320, height: 180 },
@@ -111,4 +115,38 @@ function showPickerWindow(
         }
       })
   })
+}
+
+async function ensureMacScreenPermission(parent: BrowserWindow | null): Promise<boolean> {
+  if (process.platform !== 'darwin') {
+    return true
+  }
+
+  const status = systemPreferences.getMediaAccessStatus('screen')
+  if (status === 'granted') {
+    return true
+  }
+
+  const options: MessageBoxOptions = {
+    type: 'info',
+    buttons: ['Open Settings', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Screen Recording',
+    message: 'Allow screen recording to share your screen in Teams.',
+    detail:
+      'System Settings → Privacy & Security → Screen Recording, then enable Teams PWA Launcher and return to the call.'
+  }
+  const { response } =
+    parent && !parent.isDestroyed()
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options)
+
+  if (response === 0) {
+    void shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+    )
+  }
+
+  return false
 }

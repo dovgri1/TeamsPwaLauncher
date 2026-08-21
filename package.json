@@ -2,7 +2,7 @@
   "name": "teams-pwa-launcher",
   "productName": "Teams PWA Launcher",
   "desktopName": "teams-pwa-launcher.desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Switch between multiple Microsoft Teams web profiles in one desktop app",
   "main": "./out/main/index.js",
   "author": "Dovydas Grigaitis",
@@ -19,7 +19,8 @@
     "build:unpack": "npm run build && electron-builder --dir",
     "build:linux": "npm run build && electron-builder --linux",
     "build:win": "npm run build && electron-builder --win",
-    "build:all": "npm run build && electron-builder --linux --win"
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:all": "npm run build && electron-builder --linux --win --mac"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0"

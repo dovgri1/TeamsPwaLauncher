@@ -32,6 +32,7 @@ const teamsLauncher = {
   setFormOpen: (open: boolean): void => {
     ipcRenderer.send('ui:formOpen', open)
   },
+  platform: process.platform,
   openContextMenu: (id: string): void => {
     ipcRenderer.send('profiles:contextMenu', id)
   },

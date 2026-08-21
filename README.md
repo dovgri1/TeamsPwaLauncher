@@ -1,6 +1,6 @@
 # Teams PWA Launcher
 
-**One desktop app for multiple Microsoft Teams accounts** — on Linux and Windows.
+**One desktop app for multiple Microsoft Teams accounts** — on Linux, Windows, and macOS.
 
 Instead of installing a separate Teams PWA (or browser profile) for every work, school, or personal tenant, Teams PWA Launcher keeps each account in its own isolated session inside a single application. Switch tenants from a sidebar, pop one out for a call, and keep chatting in another.
 
@@ -22,8 +22,8 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 - **Unread badges** — see notification counts per tenant in the sidebar  
 - **Detachable windows** — keep a call in a pop-out while messaging in another tenant  
 - **Screen share picker** — choose which monitor or window to share  
-- **Collapsible sidebar** — icon rail when collapsed, full tenant list when expanded (`Ctrl+B`)  
-- **Linux & Windows** — `.deb` / AppImage and Windows installer / portable exe  
+- **Collapsible sidebar** — icon rail when collapsed, full tenant list when expanded (`Ctrl+B` / `⌘B`)  
+- **Linux, Windows & macOS** — `.deb` / AppImage, Windows installer / portable exe, and a macOS `.dmg` 
 
 ## Install on Linux
 
@@ -33,7 +33,7 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 2. Install it:
 
 ```bash
-sudo apt install ./teams-pwa-launcher-1.0.0.deb
+sudo apt install ./teams-pwa-launcher-1.1.0.deb
 ```
 
 3. Open **Teams PWA Launcher** from your application menu.
@@ -50,8 +50,8 @@ sudo apt remove teams-pwa-launcher
 2. Make it executable and run:
 
 ```bash
-chmod +x teams-pwa-launcher-1.0.0.AppImage
-./teams-pwa-launcher-1.0.0.AppImage
+chmod +x teams-pwa-launcher-1.1.0.AppImage
+./teams-pwa-launcher-1.1.0.AppImage
 ```
 
 ### Build from source (Linux)
@@ -63,7 +63,7 @@ git clone https://github.com/dovgri1/TeamsPwaLauncher.git
 cd TeamsPwaLauncher
 npm install
 npm run build:linux
-sudo apt install ./dist/teams-pwa-launcher-1.0.0.deb
+sudo apt install ./dist/teams-pwa-launcher-1.1.0.deb
 ```
 
 Screen sharing on Linux uses PipeWire (`xdg-desktop-portal`). Camera and microphone prompts are allowed for Teams calls.
@@ -94,10 +94,53 @@ npm run build:win
 
 Artifacts appear under `dist\`:
 
-- `teams-pwa-launcher-1.0.0-setup.exe` — installer  
-- `teams-pwa-launcher-1.0.0-portable.exe` — portable  
+- `teams-pwa-launcher-1.1.0-setup.exe` — installer  
+- `teams-pwa-launcher-1.1.0-portable.exe` — portable  
 
 Building a Windows installer from Linux is possible with Wine, but building on Windows is more reliable.
+
+## Install on macOS
+
+Apple silicon (M1/M2/M3/M4): download `teams-pwa-launcher-*-arm64.zip` (or `.dmg` if listed).  
+Intel: download `teams-pwa-launcher-*-x64.zip` (or `.dmg`).
+
+### Option A — Disk image (`.dmg`)
+
+1. Open the disk image.
+2. Drag **Teams PWA Launcher** to **Applications**.
+
+### Option B — Zip
+
+1. Unzip the archive. You should see **Teams PWA Launcher.app**.
+2. Drag it to **Applications** (or double-click to run from Downloads).
+
+### First launch
+
+The current builds are **unsigned**. On first open, macOS may say the app is from an unidentified developer:
+
+1. In Finder, **Control-click** (right-click) **Teams PWA Launcher** → **Open** → **Open**.  
+   Or: **System Settings → Privacy & Security → Open Anyway**.
+2. Allow **Camera**, **Microphone**, and **Screen Recording** when prompted so Teams calls and screen share work.
+
+To remove later, drag the app from Applications to the Trash. Session data stays in `~/Library/Application Support/teams-pwa-launcher/` until you delete that folder.
+
+### Build from source (macOS)
+
+Requires [Node.js](https://nodejs.org/) 20.19+ or 22.12+. Build **on a Mac** for a signed/notarized app:
+
+```bash
+git clone https://github.com/dovgri1/TeamsPwaLauncher.git
+cd TeamsPwaLauncher
+npm install
+npm run build:mac
+```
+
+Artifacts appear under `dist/`:
+
+- `teams-pwa-launcher-1.1.0-arm64.dmg` / `teams-pwa-launcher-1.1.0-x64.dmg` — disk image  
+- matching `.zip` archives  
+
+Notarization needs an Apple Developer ID; without it the app still runs after the Gatekeeper prompt.
 
 ## How to use
 
@@ -108,7 +151,7 @@ Building a Windows installer from Linux is possible with Wine, but building on W
 
 ### Detach a tenant (calls + multitasking)
 
-- Click **↗** on a profile, or right-click → **Detach window**, or press **Ctrl+Shift+D**.  
+- Click **↗** on a profile, or right-click → **Detach window**, or press **Ctrl+Shift+D** (macOS: **⌘⇧D**).  
 - That tenant opens in its own window (e.g. stay on a call there).  
 - In the main window, switch to another tenant to chat or browse.  
 - Close the pop-out, or right-click → **Return to main window**, to put it back.  
@@ -121,10 +164,10 @@ When Teams asks to share your screen, a picker lists your **screens** and **wind
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+1` … `Ctrl+9` | Switch to tenant 1–9 |
-| `Ctrl+R` | Reload the focused Teams view |
-| `Ctrl+B` | Collapse / expand the tenant sidebar (icons stay visible when collapsed) |
-| `Ctrl+Shift+D` | Detach the active tenant |
+| `Ctrl+1` … `Ctrl+9` (macOS: `⌘1`–`⌘9`) | Switch to tenant 1–9 |
+| `Ctrl+R` (macOS: `⌘R`) | Reload the focused Teams view |
+| `Ctrl+B` (macOS: `⌘B`) | Collapse / expand the tenant sidebar (icons stay visible when collapsed) |
+| `Ctrl+Shift+D` (macOS: `⌘⇧D`) | Detach the active tenant |
 | Right-click a profile | Edit, detach/reattach, reload, clear session, or delete |
 | Double-click a profile | Edit name / icon / color |
 
@@ -144,6 +187,7 @@ npm run dev
 ```bash
 npm run build:linux   # Linux packages
 npm run build:win     # Windows packages (on Windows)
+npm run build:mac     # macOS packages (on a Mac)
 ```
 
 ## Where data is stored
@@ -154,6 +198,7 @@ Profiles, preferences, and Teams session data live outside the install folder:
 | --- | --- |
 | Linux | `~/.config/teams-pwa-launcher/` |
 | Windows | `%APPDATA%\teams-pwa-launcher\` |
+| macOS | `~/Library/Application Support/teams-pwa-launcher/` |
 
 Reinstalling the app does **not** remove this folder. Delete it yourself only if you want a full reset (including all saved logins).
 

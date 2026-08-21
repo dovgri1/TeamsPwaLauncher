@@ -12,6 +12,8 @@ import {
 import { ICON_CHOICES, ProfileIcon } from './ProfileIcon'
 
 const emptyStore: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
+const isMac = window.teamsLauncher.platform === 'darwin'
+const modKey = isMac ? '⌘' : 'Ctrl'
 
 export default function App(): JSX.Element {
   const [store, setStore] = useState<ProfileStore>(emptyStore)
@@ -167,7 +169,7 @@ export default function App(): JSX.Element {
             <button
               type="button"
               className="sidebar-toggle"
-              title="Show tenant sidebar (Ctrl+B)"
+              title={`Show tenant sidebar (${modKey}${isMac ? 'B' : '+B'})`}
               aria-label="Show tenant sidebar"
               onClick={() => void toggleSidebar()}
             >
@@ -187,7 +189,7 @@ export default function App(): JSX.Element {
               <button
                 type="button"
                 className="sidebar-toggle"
-                title="Hide tenant sidebar (Ctrl+B)"
+                title={`Hide tenant sidebar (${modKey}${isMac ? 'B' : '+B'})`}
                 aria-label="Hide tenant sidebar"
                 onClick={() => void toggleSidebar()}
               >
@@ -234,10 +236,10 @@ export default function App(): JSX.Element {
             </div>
             <footer className="sidebar-footer">
               <span>
-                <kbd>Ctrl</kbd> 1–9
+                <kbd>{modKey}</kbd> 1–9
               </span>
               <span>
-                <kbd>Ctrl+Shift+D</kbd>
+                <kbd>{isMac ? '⌘⇧D' : 'Ctrl+Shift+D'}</kbd>
               </span>
             </footer>
           </>
@@ -385,7 +387,7 @@ function ProfileRow({
 }): JSX.Element {
   const letter = profile.name.trim().charAt(0).toUpperCase() || 'T'
   const badgeLabel = formatUnread(unread)
-  const shortcut = detached ? 'Detached' : index < 9 ? `Ctrl+${index + 1}` : ''
+  const shortcut = detached ? 'Detached' : index < 9 ? `${modKey}${isMac ? '' : '+'}${index + 1}` : ''
   const rowClass = [
     'profile-row',
     collapsed ? 'collapsed' : '',
