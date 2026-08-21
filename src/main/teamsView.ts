@@ -186,6 +186,10 @@ export function showProfile(profile: Profile): void {
 
 export function hideAllViews(): void {
   activeProfileId = null
+  hideEmbeddedViews()
+}
+
+export function hideEmbeddedViews(): void {
   for (const [id, view] of views) {
     if (!popouts.has(id)) {
       view.setVisible(false)
@@ -223,7 +227,7 @@ export function detachProfile(profile: Profile): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#1B1A19',
+    backgroundColor: '#201F1E',
     title: profile.name,
     ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
@@ -416,6 +420,7 @@ export function attachAppWebContentsHandlers(): void {
       win.on('enter-full-screen', ping)
       win.on('leave-full-screen', ping)
     })
+    attachSignInHelpers(contents)
   })
 }
 
@@ -515,6 +520,94 @@ function teamsEntryUrl(url: string): string {
   }
 }
 
+const SIGNIN_HELPER = `(() => {
+  if (window.__teamsLauncherSigninHelper) return;
+  window.__teamsLauncherSigninHelper = true;
+
+  const reject = () =>
+    Promise.reject(new DOMException('NotAllowedError', 'NotAllowedError'));
+  try {
+    if (navigator.credentials) {
+      navigator.credentials.get = reject;
+      navigator.credentials.create = reject;
+    }
+    if (window.PublicKeyCredential) {
+      window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = () =>
+        Promise.resolve(false);
+      if (window.PublicKeyCredential.isConditionalMediationAvailable) {
+        window.PublicKeyCredential.isConditionalMediationAvailable = () => Promise.resolve(false);
+      }
+    }
+  } catch {
+    // Page may freeze the credentials API.
+  }
+
+  let clicked = false;
+  const stuckOnPasskey = () => {
+    const text = (document.body && document.body.innerText) || '';
+    return (
+      /Face, fingerprint, PIN or security key/i.test(text) ||
+      /open a security window/i.test(text)
+    );
+  };
+  const clickFallback = () => {
+    const nodes = document.querySelectorAll('a, button, [role="button"]');
+    for (const el of nodes) {
+      const t = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (!t || t.length > 90) continue;
+      if (
+        /use (your |a )?password/i.test(t) ||
+        /sign in another way/i.test(t) ||
+        /other ways to sign in/i.test(t) ||
+        /use a different (account|method)/i.test(t) ||
+        /i can't use/i.test(t)
+      ) {
+        el.click();
+        return true;
+      }
+    }
+    return false;
+  };
+  const tick = () => {
+    if (clicked || !stuckOnPasskey()) return;
+    if (clickFallback()) clicked = true;
+  };
+
+  document.addEventListener('DOMContentLoaded', tick);
+  if (document.readyState !== 'loading') tick();
+  try {
+    if (document.documentElement) {
+      new MutationObserver(tick).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    }
+  } catch {}
+  setTimeout(tick, 400);
+  setTimeout(tick, 1400);
+  setTimeout(tick, 3000);
+})();`
+
+function attachSignInHelpers(contents: WebContents): void {
+  const inject = (): void => {
+    if (contents.isDestroyed() || contents === mainWindow?.webContents) {
+      return
+    }
+    void contents.executeJavaScript(SIGNIN_HELPER).catch(() => undefined)
+  }
+
+  contents.on('dom-ready', inject)
+  contents.on('did-finish-load', inject)
+  contents.on('frame-created', (_event, details) => {
+    const frame = details.frame
+    if (!frame || frame.isDestroyed()) {
+      return
+    }
+    void frame.executeJavaScript(SIGNIN_HELPER).catch(() => undefined)
+  })
+}
+
 function attachLoginRecovery(contents: WebContents, profile: Profile): void {
   let recoveries = 0
   contents.on('did-finish-load', () => {
@@ -579,7 +672,7 @@ function handleWindowOpen(
         minWidth: 640,
         minHeight: 480,
         autoHideMenuBar: true,
-        backgroundColor: '#1B1A19',
+        backgroundColor: '#201F1E',
         useContentSize: true,
         webPreferences: {
           session: contents.session,

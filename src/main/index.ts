@@ -12,6 +12,7 @@ import {
   getDetachedIds,
   getUnreadMap,
   hideAllViews,
+  hideEmbeddedViews,
   initTeamsViews,
   isDetached,
   reattachProfile,
@@ -39,6 +40,11 @@ app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer')
 }
+// Linux Electron never shows the OS passkey/PIN window, so Microsoft login hangs.
+app.commandLine.appendSwitch(
+  'disable-features',
+  'WebAuthentication,WebAuthenticationConditionalUI'
+)
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -126,7 +132,7 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#1B1A19',
+    backgroundColor: '#201F1E',
     title: 'Teams PWA Launcher',
     ...(process.platform !== 'darwin' ? { icon } : {}),
     webPreferences: {
@@ -200,6 +206,19 @@ function registerIpc(): void {
       return
     }
     setStageBounds(bounds)
+  })
+  ipcMain.on('ui:formOpen', (event, open: boolean) => {
+    if (event.sender !== mainWindow?.webContents) {
+      return
+    }
+    if (open) {
+      hideEmbeddedViews()
+      return
+    }
+    const profile = store.profiles.find((item) => item.id === store.activeProfileId)
+    if (profile && !isDetached(profile.id)) {
+      showProfile(profile)
+    }
   })
   ipcMain.on('profiles:contextMenu', (event, id: string) => {
     const profile = store.profiles.find((item) => item.id === id)

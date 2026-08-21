@@ -20,6 +20,7 @@ export type TeamsLauncherApi = {
   listUnread: () => Promise<UnreadMap>
   setSidebarCollapsed: (collapsed: boolean) => Promise<ProfileStore>
   setStageBounds: (bounds: { x: number; y: number; width: number; height: number }) => void
+  setFormOpen: (open: boolean) => void
   openContextMenu: (id: string) => void
   onChanged: (callback: (store: ProfileStore) => void) => () => void
   onUnread: (callback: (unread: UnreadMap) => void) => () => void

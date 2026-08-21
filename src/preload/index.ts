@@ -29,6 +29,9 @@ const teamsLauncher = {
   setStageBounds: (bounds: { x: number; y: number; width: number; height: number }): void => {
     ipcRenderer.send('ui:stageBounds', bounds)
   },
+  setFormOpen: (open: boolean): void => {
+    ipcRenderer.send('ui:formOpen', open)
+  },
   openContextMenu: (id: string): void => {
     ipcRenderer.send('profiles:contextMenu', id)
   },

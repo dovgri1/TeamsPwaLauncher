@@ -79,6 +79,23 @@ export default function App(): JSX.Element {
     }
   }, [store.profiles.length, store.sidebarCollapsed])
 
+  useEffect(() => {
+    window.teamsLauncher.setFormOpen(formMode !== 'hidden')
+  }, [formMode])
+
+  useEffect(() => {
+    if (formMode === 'hidden') {
+      return
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeForm()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [formMode, store.profiles.length])
+
   const nextColor = useMemo(() => {
     return PROFILE_COLORS[store.profiles.length % PROFILE_COLORS.length]
   }, [store.profiles.length])
@@ -89,9 +106,6 @@ export default function App(): JSX.Element {
     setDraftName('')
     setDraftColor(nextColor)
     setDraftIcon('letter')
-    if (collapsed) {
-      void window.teamsLauncher.setSidebarCollapsed(false)
-    }
   }
 
   function openEdit(profile: Profile): void {
@@ -100,13 +114,14 @@ export default function App(): JSX.Element {
     setDraftName(profile.name)
     setDraftColor(profile.color)
     setDraftIcon(profile.icon)
-    if (collapsed) {
-      void window.teamsLauncher.setSidebarCollapsed(false)
-    }
   }
 
   function closeForm(): void {
-    setFormMode(store.profiles.length === 0 ? 'add' : 'hidden')
+    if (store.profiles.length === 0) {
+      setFormMode('add')
+      return
+    }
+    setFormMode('hidden')
     setEditingId(null)
   }
 
@@ -156,14 +171,18 @@ export default function App(): JSX.Element {
               aria-label="Show tenant sidebar"
               onClick={() => void toggleSidebar()}
             >
-              ›
+              <ChevronIcon direction="right" />
             </button>
           ) : (
             <>
-              <div className="brand-mark">T</div>
-              <div className="sidebar-title">
-                <h1>Teams</h1>
-                <p>Tenants</p>
+              <div className="brand">
+                <div className="brand-mark" aria-hidden>
+                  <BrandMark />
+                </div>
+                <div className="sidebar-title">
+                  <p className="eyebrow">Launcher</p>
+                  <h1>Accounts</h1>
+                </div>
               </div>
               <button
                 type="button"
@@ -172,11 +191,13 @@ export default function App(): JSX.Element {
                 aria-label="Hide tenant sidebar"
                 onClick={() => void toggleSidebar()}
               >
-                ‹
+                <ChevronIcon direction="left" />
               </button>
             </>
           )}
         </header>
+
+        {!collapsed ? <p className="section-label">Profiles</p> : null}
 
         <nav className="profile-list" aria-label="Teams tenants">
           {store.profiles.map((profile, index) => (
@@ -198,24 +219,86 @@ export default function App(): JSX.Element {
             />
           ))}
 
-          {!collapsed && store.profiles.length === 0 && formMode !== 'add' ? (
+          {!collapsed && store.profiles.length === 0 ? (
             <p className="empty-hint">No profiles yet. Add one to sign in to Teams.</p>
           ) : null}
         </nav>
 
         {!collapsed ? (
           <>
-        {formMode !== 'hidden' ? (
+            <div className="sidebar-actions">
+              <button className="add-button" type="button" onClick={openAdd}>
+                <PlusIcon />
+                Add profile
+              </button>
+            </div>
+            <footer className="sidebar-footer">
+              <span>
+                <kbd>Ctrl</kbd> 1–9
+              </span>
+              <span>
+                <kbd>Ctrl+Shift+D</kbd>
+              </span>
+            </footer>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="add-button collapsed-add"
+            title="Add profile"
+            aria-label="Add profile"
+            onClick={openAdd}
+          >
+            <PlusIcon />
+          </button>
+        )}
+      </aside>
+
+      <main className="stage" ref={stageRef}>
+        {store.profiles.length === 0 ? (
+          <section className="welcome">
+            <h2>One app, multiple Teams accounts</h2>
+            <p>
+              Create a named profile for each account. Each profile keeps its own login, cookies, and
+              Teams data — no extra PWAs on your system.
+            </p>
+          </section>
+        ) : (
+          <div className="stage-fill" />
+        )}
+      </main>
+
+      {formMode !== 'hidden' ? (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeForm()
+            }
+          }}
+        >
           <form
-            className="profile-form"
+            className="profile-form modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-dialog-title"
             onSubmit={(event) => {
               event.preventDefault()
               void submitForm()
             }}
           >
-            <label htmlFor="profile-name">Profile name</label>
+            <div className="form-heading">
+              <p id="profile-dialog-title">{formMode === 'edit' ? 'Edit profile' : 'New profile'}</p>
+              {store.profiles.length > 0 ? (
+                <button type="button" className="ghost compact" onClick={closeForm}>
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+            <label htmlFor="profile-name">Name</label>
             <input
               id="profile-name"
+              type="text"
               autoFocus
               value={draftName}
               placeholder="Work, Personal…"
@@ -271,43 +354,8 @@ export default function App(): JSX.Element {
               ) : null}
             </div>
           </form>
-        ) : (
-          <button className="add-button" type="button" onClick={openAdd}>
-            + Add profile
-          </button>
-        )}
-
-        <footer className="sidebar-footer">
-          <span>Ctrl+1–9 switch</span>
-          <span>Ctrl+Shift+D detach</span>
-        </footer>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="add-button collapsed-add"
-            title="Add profile"
-            aria-label="Add profile"
-            onClick={openAdd}
-          >
-            +
-          </button>
-        )}
-      </aside>
-
-      <main className="stage" ref={stageRef}>
-        {store.profiles.length === 0 ? (
-          <section className="welcome">
-            <h2>One app, multiple Teams accounts</h2>
-            <p>
-              Create a named profile for each account. Each profile keeps its own login, cookies, and
-              Teams data — no extra PWAs on your system.
-            </p>
-          </section>
-        ) : (
-          <div className="stage-fill" />
-        )}
-      </main>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -390,7 +438,7 @@ function ProfileRow({
                 onDetach()
               }}
             >
-              ↗
+              <DetachIcon />
             </button>
           ) : null}
         </>
@@ -411,4 +459,51 @@ function formatUnread(unread?: UnreadBadge): string | null {
 
 function isHexColor(value: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(value)
+}
+
+function BrandMark(): JSX.Element {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M2.5 3.5h4.2v4.2H2.5V3.5zm0 5.3h4.2v4.7H2.5V8.8zm5.3-5.3H13.5V8H7.8V3.5zm0 5.3H13.5v4.7H7.8V8.8z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+function ChevronIcon({ direction }: { direction: 'left' | 'right' }): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d={direction === 'left' ? 'M10 3.5 5.5 8 10 12.5' : 'M6 3.5 10.5 8 6 12.5'}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function PlusIcon(): JSX.Element {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function DetachIcon(): JSX.Element {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M6.5 3.5H3.5v9h9V9.5M8.5 3.5h4v4M12.5 3.5 7 9"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
