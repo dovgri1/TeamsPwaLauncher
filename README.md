@@ -33,7 +33,7 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 2. Install it:
 
 ```bash
-sudo apt install ./teams-pwa-launcher-1.1.0.deb
+sudo apt install ./teams-pwa-launcher-1.1.1.deb
 ```
 
 3. Open **Teams PWA Launcher** from your application menu.
@@ -50,8 +50,8 @@ sudo apt remove teams-pwa-launcher
 2. Make it executable and run:
 
 ```bash
-chmod +x teams-pwa-launcher-1.1.0.AppImage
-./teams-pwa-launcher-1.1.0.AppImage
+chmod +x teams-pwa-launcher-1.1.1.AppImage
+./teams-pwa-launcher-1.1.1.AppImage
 ```
 
 ### Build from source (Linux)
@@ -63,7 +63,7 @@ git clone https://github.com/dovgri1/TeamsPwaLauncher.git
 cd TeamsPwaLauncher
 npm install
 npm run build:linux
-sudo apt install ./dist/teams-pwa-launcher-1.1.0.deb
+sudo apt install ./dist/teams-pwa-launcher-1.1.1.deb
 ```
 
 Screen sharing on Linux uses PipeWire (`xdg-desktop-portal`). Camera and microphone prompts are allowed for Teams calls.
@@ -94,39 +94,30 @@ npm run build:win
 
 Artifacts appear under `dist\`:
 
-- `teams-pwa-launcher-1.1.0-setup.exe` — installer  
-- `teams-pwa-launcher-1.1.0-portable.exe` — portable  
+- `teams-pwa-launcher-1.1.1-setup.exe` — installer  
+- `teams-pwa-launcher-1.1.1-portable.exe` — portable  
 
 Building a Windows installer from Linux is possible with Wine, but building on Windows is more reliable.
 
 ## Install on macOS
 
-Apple silicon (M1/M2/M3/M4): download `teams-pwa-launcher-*-arm64.zip` (or `.dmg` if listed).  
-Intel: download `teams-pwa-launcher-*-x64.zip` (or `.dmg`).
+Release builds are produced on GitHub-hosted Mac runners (not from Linux). Prefer the **`.dmg`**.
 
-### Option A — Disk image (`.dmg`)
+- Apple silicon (M1/M2/M3/M4): `teams-pwa-launcher-*-arm64.dmg`
+- Intel: `teams-pwa-launcher-*-x64.dmg`
 
-1. Open the disk image.
-2. Drag **Teams PWA Launcher** to **Applications**.
+1. Open the disk image and drag **Teams PWA Launcher** to **Applications**.
+2. First launch: in Finder, **Control-click** the app → **Open** → **Open**.  
+   macOS may warn that the developer is unidentified until the app is notarized with an Apple Developer ID. You should **not** need Terminal.
+3. Allow **Camera**, **Microphone**, and **Screen Recording** when prompted.
 
-### Option B — Zip
-
-1. Unzip the archive. You should see **Teams PWA Launcher.app**.
-2. Drag it to **Applications** (or double-click to run from Downloads).
-
-### First launch
-
-The current builds are **unsigned**. On first open, macOS may say the app is from an unidentified developer:
-
-1. In Finder, **Control-click** (right-click) **Teams PWA Launcher** → **Open** → **Open**.  
-   Or: **System Settings → Privacy & Security → Open Anyway**.
-2. Allow **Camera**, **Microphone**, and **Screen Recording** when prompted so Teams calls and screen share work.
+A `.zip` of the same `.app` is also on the release if you prefer it.
 
 To remove later, drag the app from Applications to the Trash. Session data stays in `~/Library/Application Support/teams-pwa-launcher/` until you delete that folder.
 
 ### Build from source (macOS)
 
-Requires [Node.js](https://nodejs.org/) 20.19+ or 22.12+. Build **on a Mac** for a signed/notarized app:
+Requires [Node.js](https://nodejs.org/) 20.19+ or 22.12+. Build **on a Mac**:
 
 ```bash
 git clone https://github.com/dovgri1/TeamsPwaLauncher.git
@@ -137,10 +128,10 @@ npm run build:mac
 
 Artifacts appear under `dist/`:
 
-- `teams-pwa-launcher-1.1.0-arm64.dmg` / `teams-pwa-launcher-1.1.0-x64.dmg` — disk image  
-- matching `.zip` archives  
+- `teams-pwa-launcher-1.1.1-arm64.dmg` / `teams-pwa-launcher-1.1.1-x64.dmg`
+- matching `.zip` archives
 
-Notarization needs an Apple Developer ID; without it the app still runs after the Gatekeeper prompt.
+Notarization needs an Apple Developer ID. GitHub Actions tags (`v*`) run the same Mac build automatically.
 
 ## How to use
 

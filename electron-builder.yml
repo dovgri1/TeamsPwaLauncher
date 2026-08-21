@@ -10,8 +10,11 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!.github/**'
+  - '!scripts/*'
 asarUnpack:
   - resources/**
+afterPack: scripts/afterPack.cjs
 win:
   target:
     - nsis
