@@ -19,7 +19,11 @@ const ALLOWED_HOSTS = [
   /(?:^|\.)svc\.ms$/i,
   /(?:^|\.)microsoftpersonalcontent\.com$/i,
   /(?:^|\.)msftauth\.net$/i,
-  /(?:^|\.)msftauthimages\.net$/i
+  /(?:^|\.)msftauthimages\.net$/i,
+  /(?:^|\.)dynamics\.com$/i,
+  /(?:^|\.)dynamics365\.com$/i,
+  /(?:^|\.)powerapps\.com$/i,
+  /(?:^|\.)powerplatform\.com$/i
 ]
 
 export function isAllowedTeamsUrl(url: string): boolean {

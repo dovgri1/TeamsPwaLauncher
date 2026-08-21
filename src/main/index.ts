@@ -21,6 +21,7 @@ import {
   setSwitchIndexHandler,
   setToggleSidebarHandler,
   setSidebarCollapsed,
+  setStageBounds,
   setUnreadHandler,
   showProfile,
   syncBounds,
@@ -193,6 +194,12 @@ function registerIpc(): void {
   ipcMain.handle('ui:setSidebarCollapsed', (_event, collapsed: boolean) => {
     applySidebarCollapsed(collapsed)
     return store
+  })
+  ipcMain.on('ui:stageBounds', (event, bounds: { x: number; y: number; width: number; height: number }) => {
+    if (event.sender !== mainWindow?.webContents) {
+      return
+    }
+    setStageBounds(bounds)
   })
   ipcMain.on('profiles:contextMenu', (event, id: string) => {
     const profile = store.profiles.find((item) => item.id === id)

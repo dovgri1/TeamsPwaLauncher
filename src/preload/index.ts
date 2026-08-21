@@ -26,6 +26,9 @@ const teamsLauncher = {
   listUnread: (): Promise<UnreadMap> => ipcRenderer.invoke('unread:list'),
   setSidebarCollapsed: (collapsed: boolean): Promise<ProfileStore> =>
     ipcRenderer.invoke('ui:setSidebarCollapsed', collapsed),
+  setStageBounds: (bounds: { x: number; y: number; width: number; height: number }): void => {
+    ipcRenderer.send('ui:stageBounds', bounds)
+  },
   openContextMenu: (id: string): void => {
     ipcRenderer.send('profiles:contextMenu', id)
   },

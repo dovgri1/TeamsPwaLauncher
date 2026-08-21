@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX, type MouseEvent } from 'react'
 import {
   PROFILE_COLORS,
   SIDEBAR_COLLAPSED_WIDTH,
@@ -22,6 +22,7 @@ export default function App(): JSX.Element {
   const [draftName, setDraftName] = useState('')
   const [draftColor, setDraftColor] = useState<string>(PROFILE_COLORS[0])
   const [draftIcon, setDraftIcon] = useState<ProfileIconId>('letter')
+  const stageRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     void window.teamsLauncher.listProfiles().then((next) => {
@@ -51,6 +52,32 @@ export default function App(): JSX.Element {
       openEdit(profile)
     })
   }, [store.profiles])
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) {
+      return
+    }
+
+    const report = (): void => {
+      const rect = stage.getBoundingClientRect()
+      window.teamsLauncher.setStageBounds({
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height
+      })
+    }
+
+    const observer = new ResizeObserver(report)
+    observer.observe(stage)
+    window.addEventListener('resize', report)
+    report()
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', report)
+    }
+  }, [store.profiles.length, store.sidebarCollapsed])
 
   const nextColor = useMemo(() => {
     return PROFILE_COLORS[store.profiles.length % PROFILE_COLORS.length]
@@ -268,7 +295,7 @@ export default function App(): JSX.Element {
         )}
       </aside>
 
-      <main className="stage">
+      <main className="stage" ref={stageRef}>
         {store.profiles.length === 0 ? (
           <section className="welcome">
             <h2>One app, multiple Teams accounts</h2>

@@ -35,6 +35,8 @@ let onDetachedChange: ((ids: string[]) => void) | null = null
 let onActiveCleared: (() => void) | null = null
 let unreadPoll: ReturnType<typeof setInterval> | null = null
 let sidebarOffset = SIDEBAR_WIDTH
+let stageBounds: { x: number; y: number; width: number; height: number } | null = null
+const guestResizeTimers = new WeakMap<WebContents, ReturnType<typeof setTimeout>>()
 
 const BADGE_SCRIPT = `(() => {
   if (window.__teamsLauncherBadgeHook) return;
@@ -94,6 +96,24 @@ export function setSidebarCollapsed(collapsed: boolean): void {
   syncActiveBounds()
 }
 
+export function setStageBounds(bounds: { x: number; y: number; width: number; height: number }): void {
+  const next = roundBounds(bounds)
+  if (!next) {
+    return
+  }
+  if (
+    stageBounds &&
+    stageBounds.x === next.x &&
+    stageBounds.y === next.y &&
+    stageBounds.width === next.width &&
+    stageBounds.height === next.height
+  ) {
+    return
+  }
+  stageBounds = next
+  syncActiveBounds()
+}
+
 export function getUnreadMap(): UnreadMap {
   return publishUnread(false)
 }
@@ -108,18 +128,18 @@ export function isDetached(id: string): boolean {
 
 export function initTeamsViews(win: BrowserWindow): void {
   mainWindow = win
-  win.on('resize', syncActiveBounds)
-  win.on('maximize', syncActiveBounds)
-  win.on('unmaximize', syncActiveBounds)
-  win.on('enter-html-full-screen', () => {
-    const view = activeEmbeddedView()
-    if (!view) {
-      return
-    }
-    const [width, height] = win.getContentSize()
-    view.setBounds({ x: 0, y: 0, width, height })
-  })
-  win.on('leave-html-full-screen', syncActiveBounds)
+  const schedule = (): void => {
+    syncActiveBounds()
+    setImmediate(syncActiveBounds)
+  }
+  win.on('resize', schedule)
+  win.on('resized', schedule)
+  win.on('maximize', schedule)
+  win.on('unmaximize', schedule)
+  win.on('enter-full-screen', schedule)
+  win.on('leave-full-screen', schedule)
+  win.on('enter-html-full-screen', schedule)
+  win.on('leave-html-full-screen', schedule)
 
   if (!unreadPoll) {
     unreadPoll = setInterval(() => {
@@ -219,8 +239,11 @@ export function detachProfile(profile: Profile): void {
   syncPopoutBounds(profile.id)
 
   popout.on('resize', () => syncPopoutBounds(profile.id))
+  popout.on('resized', () => syncPopoutBounds(profile.id))
   popout.on('maximize', () => syncPopoutBounds(profile.id))
   popout.on('unmaximize', () => syncPopoutBounds(profile.id))
+  popout.on('enter-full-screen', () => syncPopoutBounds(profile.id))
+  popout.on('leave-full-screen', () => syncPopoutBounds(profile.id))
   popout.on('closed', () => {
     if (!popouts.has(profile.id)) {
       return
@@ -370,10 +393,10 @@ export function attachAppWebContentsHandlers(): void {
   app.on('web-contents-created', (_event, contents) => {
     contents.setWindowOpenHandler((details) => handleWindowOpen(details, contents))
     contents.on('will-navigate', (event, url) => {
-      handleNavigation(event, contents, url, 'navigate')
+      handleNavigation(event, contents, url)
     })
     contents.on('will-redirect', (event, url) => {
-      handleNavigation(event, contents, url, 'redirect')
+      handleNavigation(event, contents, url)
     })
     contents.on('context-menu', (_event, params) => {
       if (contents === mainWindow?.webContents) {
@@ -384,25 +407,25 @@ export function attachAppWebContentsHandlers(): void {
     contents.on('before-input-event', (event, input) => {
       handleShortcut(event, input)
     })
+    contents.on('did-create-window', (win) => {
+      const ping = (): void => notifyGuestResize(win.webContents)
+      win.on('resize', ping)
+      win.on('resized', ping)
+      win.on('maximize', ping)
+      win.on('unmaximize', ping)
+      win.on('enter-full-screen', ping)
+      win.on('leave-full-screen', ping)
+    })
   })
 }
 
 function handleNavigation(
   event: { preventDefault: () => void },
   contents: WebContents,
-  url: string,
-  mode: 'navigate' | 'redirect'
+  url: string
 ): void {
   if (isAppRendererUrl(contents, url)) {
     return
-  }
-  if (mode === 'navigate') {
-    const rewritten = preferWorkAccountLogin(url)
-    if (rewritten) {
-      event.preventDefault()
-      void contents.loadURL(rewritten)
-      return
-    }
   }
   if (isAllowedTeamsUrl(url)) {
     return
@@ -440,6 +463,7 @@ function createView(profile: Profile): WebContentsView {
   configureSession(view.webContents.session, profile.id)
   view.webContents.setUserAgent(chromeUserAgent())
   attachUnreadTracking(profile.id, view.webContents)
+  attachLoginRecovery(view.webContents, profile)
   view.setVisible(false)
   void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
   return view
@@ -456,25 +480,6 @@ function configureSession(ses: Session, profileId: string): void {
     callback(isAllowedPermission(permission))
   })
   ses.setPermissionCheckHandler((_contents, permission) => isAllowedPermission(permission))
-
-  // Prefer work/school email entry over Windows personal Microsoft account shortcuts.
-  ses.webRequest.onBeforeRequest(
-    {
-      urls: [
-        'https://login.microsoftonline.com/*',
-        'https://login.microsoft.com/*',
-        'https://login.windows.net/*'
-      ]
-    },
-    (details, callback) => {
-      const rewritten = preferWorkAccountLogin(details.url)
-      if (rewritten) {
-        callback({ redirectURL: rewritten })
-        return
-      }
-      callback({})
-    }
-  )
 
   ses.setDisplayMediaRequestHandler((_request, callback) => {
     void pickDisplaySource(mainWindow)
@@ -494,7 +499,7 @@ function configureSession(ses: Session, profileId: string): void {
   })
 }
 
-/** Start Teams in a way that leads to an email field, not a personal-account shortcut. */
+/** Start Teams with account picker instead of a silent/personal-account shortcut. */
 function teamsEntryUrl(url: string): string {
   try {
     const parsed = new URL(url)
@@ -502,7 +507,7 @@ function teamsEntryUrl(url: string): string {
       return url
     }
     if (!parsed.searchParams.has('prompt')) {
-      parsed.searchParams.set('prompt', 'login')
+      parsed.searchParams.set('prompt', 'select_account')
     }
     return parsed.toString()
   } catch {
@@ -510,48 +515,25 @@ function teamsEntryUrl(url: string): string {
   }
 }
 
-/**
- * Rewrite Microsoft login URLs so Windows does not push a personal MSA.
- * - common/consumers → organizations (work/school)
- * - prompt=login when unset (skip silent prompt=none renewals)
- */
-function preferWorkAccountLogin(url: string): string | null {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return null
-  }
-
-  const host = parsed.hostname.toLowerCase()
-  if (
-    host !== 'login.microsoftonline.com' &&
-    host !== 'login.microsoft.com' &&
-    host !== 'login.windows.net'
-  ) {
-    return null
-  }
-
-  let changed = false
-  const nextPath = parsed.pathname.replace(/^\/(common|consumers)(?=\/|$)/i, '/organizations')
-  if (nextPath !== parsed.pathname) {
-    parsed.pathname = nextPath
-    changed = true
-  }
-
-  const prompt = parsed.searchParams.get('prompt')
-  if (prompt === null && !/\/logout/i.test(parsed.pathname)) {
-    parsed.searchParams.set('prompt', 'login')
-    changed = true
-  }
-
-  // Discourage MSA federation on the work login page.
-  if (!parsed.searchParams.has('msafed')) {
-    parsed.searchParams.set('msafed', '0')
-    changed = true
-  }
-
-  return changed ? parsed.toString() : null
+function attachLoginRecovery(contents: WebContents, profile: Profile): void {
+  let recoveries = 0
+  contents.on('did-finish-load', () => {
+    if (contents.isDestroyed() || recoveries >= 2) {
+      return
+    }
+    void contents
+      .executeJavaScript(
+        `Boolean(document.body && /AADSTS900561/i.test(document.body.innerText || ''))`
+      )
+      .then((stuck: unknown) => {
+        if (stuck !== true || contents.isDestroyed() || recoveries >= 2) {
+          return
+        }
+        recoveries += 1
+        void contents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url)))
+      })
+      .catch(() => undefined)
+  })
 }
 
 function chromeUserAgent(): string {
@@ -594,8 +576,11 @@ function handleWindowOpen(
       overrideBrowserWindowOptions: {
         width: 1100,
         height: 800,
+        minWidth: 640,
+        minHeight: 480,
         autoHideMenuBar: true,
         backgroundColor: '#1B1A19',
+        useContentSize: true,
         webPreferences: {
           session: contents.session,
           sandbox: true,
@@ -744,17 +729,18 @@ function syncActiveBounds(): void {
   }
 
   const [width, height] = mainWindow.getContentSize()
-  if (mainWindow.isFullScreen() || mainWindow.isSimpleFullScreen()) {
-    view.setBounds({ x: 0, y: 0, width, height })
-    return
-  }
+  const htmlFullscreen = mainWindow.isFullScreen() || mainWindow.isSimpleFullScreen()
+  const bounds =
+    !htmlFullscreen && stageBounds
+      ? stageBounds
+      : {
+          x: htmlFullscreen ? 0 : sidebarOffset,
+          y: 0,
+          width: Math.max(0, width - (htmlFullscreen ? 0 : sidebarOffset)),
+          height
+        }
 
-  view.setBounds({
-    x: sidebarOffset,
-    y: 0,
-    width: Math.max(0, width - sidebarOffset),
-    height
-  })
+  applyViewBounds(view, bounds)
 }
 
 function syncPopoutBounds(id: string): void {
@@ -764,7 +750,78 @@ function syncPopoutBounds(id: string): void {
     return
   }
   const [width, height] = win.getContentSize()
-  view.setBounds({ x: 0, y: 0, width, height })
+  applyViewBounds(view, { x: 0, y: 0, width, height })
+}
+
+function applyViewBounds(
+  view: WebContentsView,
+  bounds: { x: number; y: number; width: number; height: number }
+): void {
+  const next = roundBounds(bounds)
+  if (!next) {
+    return
+  }
+  const current = view.getBounds()
+  if (
+    current.x !== next.x ||
+    current.y !== next.y ||
+    current.width !== next.width ||
+    current.height !== next.height
+  ) {
+    view.setBounds(next)
+  }
+  notifyGuestResize(view.webContents)
+}
+
+function roundBounds(bounds: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): { x: number; y: number; width: number; height: number } | null {
+  if (
+    !Number.isFinite(bounds.x) ||
+    !Number.isFinite(bounds.y) ||
+    !Number.isFinite(bounds.width) ||
+    !Number.isFinite(bounds.height)
+  ) {
+    return null
+  }
+  return {
+    x: Math.max(0, Math.round(bounds.x)),
+    y: Math.max(0, Math.round(bounds.y)),
+    width: Math.max(0, Math.round(bounds.width)),
+    height: Math.max(0, Math.round(bounds.height))
+  }
+}
+
+function notifyGuestResize(contents: WebContents): void {
+  if (contents.isDestroyed()) {
+    return
+  }
+  const existing = guestResizeTimers.get(contents)
+  if (existing) {
+    clearTimeout(existing)
+  }
+  guestResizeTimers.set(
+    contents,
+    setTimeout(() => {
+      guestResizeTimers.delete(contents)
+      if (contents.isDestroyed()) {
+        return
+      }
+      void contents
+        .executeJavaScript(
+          `(() => {
+            window.dispatchEvent(new Event('resize'));
+            if (window.visualViewport) {
+              window.visualViewport.dispatchEvent(new Event('resize'));
+            }
+          })()`
+        )
+        .catch(() => undefined)
+    }, 16)
+  )
 }
 
 function publishDetached(): void {
