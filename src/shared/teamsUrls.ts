@@ -73,6 +73,28 @@ export function isTeamsDiagnosticsUrl(url: string): boolean {
   return /report-third-party-cookies/i.test(parsed.pathname)
 }
 
+const LOGIN_HOSTS = [
+  /(?:^|\.)login\.microsoftonline\.com$/i,
+  /(?:^|\.)login\.microsoft\.com$/i,
+  /(?:^|\.)login\.live\.com$/i,
+  /(?:^|\.)login\.windows\.net$/i
+]
+
+const TEAMS_APP_HOSTS = [
+  /(?:^|\.)teams\.microsoft\.com$/i,
+  /(?:^|\.)teams\.cloud\.microsoft$/i,
+  /(?:^|\.)teams\.live\.com$/i,
+  /(?:^|\.)microsoft365\.com$/i
+]
+
+export function isMicrosoftLoginHost(host: string): boolean {
+  return LOGIN_HOSTS.some((pattern) => pattern.test(host))
+}
+
+export function isTeamsAppHost(host: string): boolean {
+  return TEAMS_APP_HOSTS.some((pattern) => pattern.test(host))
+}
+
 export function sanitizeProfileUrl(url?: string): string {
   const candidate = url?.trim() || DEFAULT_TEAMS_URL
   return isAllowedTeamsUrl(candidate) ? candidate : DEFAULT_TEAMS_URL

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type {
   CreateProfileInput,
+  LoadStageMap,
   ProfileStore,
   UnreadMap,
   UpdateProfileInput
@@ -24,8 +25,11 @@ const teamsLauncher = {
   focusDetached: (id: string): Promise<string[]> => ipcRenderer.invoke('profiles:focusDetached', id),
   listDetached: (): Promise<string[]> => ipcRenderer.invoke('detached:list'),
   listUnread: (): Promise<UnreadMap> => ipcRenderer.invoke('unread:list'),
+  listLoadStages: (): Promise<LoadStageMap> => ipcRenderer.invoke('loadStage:list'),
   setSidebarCollapsed: (collapsed: boolean): Promise<ProfileStore> =>
     ipcRenderer.invoke('ui:setSidebarCollapsed', collapsed),
+  setLoadAllProfiles: (enabled: boolean): Promise<ProfileStore> =>
+    ipcRenderer.invoke('ui:setLoadAllProfiles', enabled),
   setStageBounds: (bounds: { x: number; y: number; width: number; height: number }): void => {
     ipcRenderer.send('ui:stageBounds', bounds)
   },
@@ -52,6 +56,15 @@ const teamsLauncher = {
     ipcRenderer.on('unread:changed', listener)
     return () => {
       ipcRenderer.removeListener('unread:changed', listener)
+    }
+  },
+  onLoadStage: (callback: (stages: LoadStageMap) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, next: LoadStageMap): void => {
+      callback(next)
+    }
+    ipcRenderer.on('loadStage:changed', listener)
+    return () => {
+      ipcRenderer.removeListener('loadStage:changed', listener)
     }
   },
   onDetached: (callback: (ids: string[]) => void): (() => void) => {

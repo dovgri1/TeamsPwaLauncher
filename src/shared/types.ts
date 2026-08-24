@@ -73,6 +73,7 @@ export type ProfileStore = {
   profiles: Profile[]
   activeProfileId: string | null
   sidebarCollapsed: boolean
+  loadAllProfiles: boolean
 }
 
 export type CreateProfileInput = {
@@ -96,3 +97,17 @@ export type UnreadBadge = {
 }
 
 export type UnreadMap = Record<string, UnreadBadge>
+
+export const LOAD_STAGES = [
+  'idle',
+  'queued',
+  'starting',
+  'loading',
+  'signing-in',
+  'ready',
+  'failed'
+] as const
+
+export type LoadStage = (typeof LOAD_STAGES)[number]
+
+export type LoadStageMap = Record<string, LoadStage>

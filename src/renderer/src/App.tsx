@@ -3,6 +3,8 @@ import {
   PROFILE_COLORS,
   SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_WIDTH,
+  type LoadStage,
+  type LoadStageMap,
   type Profile,
   type ProfileIconId,
   type ProfileStore,
@@ -11,13 +13,19 @@ import {
 } from '../../shared/types'
 import { ICON_CHOICES, ProfileIcon } from './ProfileIcon'
 
-const emptyStore: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
+const emptyStore: ProfileStore = {
+  profiles: [],
+  activeProfileId: null,
+  sidebarCollapsed: false,
+  loadAllProfiles: false
+}
 const isMac = window.teamsLauncher.platform === 'darwin'
 const modKey = isMac ? '⌘' : 'Ctrl'
 
 export default function App(): JSX.Element {
   const [store, setStore] = useState<ProfileStore>(emptyStore)
   const [unread, setUnread] = useState<UnreadMap>({})
+  const [loadStages, setLoadStages] = useState<LoadStageMap>({})
   const [detachedIds, setDetachedIds] = useState<string[]>([])
   const [formMode, setFormMode] = useState<'hidden' | 'add' | 'edit'>('hidden')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -34,13 +42,16 @@ export default function App(): JSX.Element {
       }
     })
     void window.teamsLauncher.listUnread().then(setUnread)
+    void window.teamsLauncher.listLoadStages().then(setLoadStages)
     void window.teamsLauncher.listDetached().then(setDetachedIds)
     const stopChanged = window.teamsLauncher.onChanged(setStore)
     const stopUnread = window.teamsLauncher.onUnread(setUnread)
+    const stopLoadStage = window.teamsLauncher.onLoadStage(setLoadStages)
     const stopDetached = window.teamsLauncher.onDetached(setDetachedIds)
     return () => {
       stopChanged()
       stopUnread()
+      stopLoadStage()
       stopDetached()
     }
   }, [])
@@ -211,6 +222,7 @@ export default function App(): JSX.Element {
               active={profile.id === store.activeProfileId && !detachedIds.includes(profile.id)}
               detached={detachedIds.includes(profile.id)}
               unread={unread[profile.id]}
+              loadStage={loadStages[profile.id]}
               onSelect={() => void window.teamsLauncher.switchProfile(profile.id)}
               onContextMenu={(event) => {
                 event.preventDefault()
@@ -233,6 +245,16 @@ export default function App(): JSX.Element {
                 <PlusIcon />
                 Add profile
               </button>
+              <label className="pref-row" title="Keep every tenant running so unread badges and messages work">
+                <input
+                  type="checkbox"
+                  checked={store.loadAllProfiles}
+                  onChange={(event) => {
+                    void window.teamsLauncher.setLoadAllProfiles(event.target.checked)
+                  }}
+                />
+                Load all on startup
+              </label>
             </div>
             <footer className="sidebar-footer">
               <span>
@@ -362,6 +384,16 @@ export default function App(): JSX.Element {
   )
 }
 
+const LOAD_STAGE_LABEL: Record<LoadStage, string> = {
+  idle: 'Not loaded',
+  queued: 'Waiting to load',
+  starting: 'Starting…',
+  loading: 'Loading Teams…',
+  'signing-in': 'Signing in…',
+  ready: 'Loaded',
+  failed: 'Failed to load'
+}
+
 function ProfileRow({
   profile,
   index,
@@ -369,6 +401,7 @@ function ProfileRow({
   active,
   detached,
   unread,
+  loadStage,
   onSelect,
   onContextMenu,
   onStartEdit,
@@ -380,6 +413,7 @@ function ProfileRow({
   active: boolean
   detached: boolean
   unread?: UnreadBadge
+  loadStage?: LoadStage
   onSelect: () => void
   onContextMenu: (event: MouseEvent) => void
   onStartEdit: () => void
@@ -387,6 +421,8 @@ function ProfileRow({
 }): JSX.Element {
   const letter = profile.name.trim().charAt(0).toUpperCase() || 'T'
   const badgeLabel = formatUnread(unread)
+  const stage = loadStage && loadStage !== 'idle' ? loadStage : null
+  const stageLabel = stage ? LOAD_STAGE_LABEL[stage] : null
   const shortcut = detached ? 'Detached' : index < 9 ? `${modKey}${isMac ? '' : '+'}${index + 1}` : ''
   const rowClass = [
     'profile-row',
@@ -396,14 +432,17 @@ function ProfileRow({
   ]
     .filter(Boolean)
     .join(' ')
+  const collapsedTitle = [profile.name, shortcut ? `(${shortcut})` : '', stageLabel]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div
       role="button"
       tabIndex={0}
       className={rowClass}
-      title={collapsed ? `${profile.name}${shortcut ? ` (${shortcut})` : ''}` : undefined}
-      aria-label={profile.name}
+      title={collapsed ? collapsedTitle : undefined}
+      aria-label={stageLabel ? `${profile.name}, ${stageLabel}` : profile.name}
       onClick={onSelect}
       onContextMenu={onContextMenu}
       onDoubleClick={(event) => {
@@ -422,11 +461,22 @@ function ProfileRow({
           <ProfileIcon id={profile.icon} letter={letter} />
         </span>
         {badgeLabel ? <span className="unread-badge">{badgeLabel}</span> : null}
+        {stage ? (
+          <span
+            className={`load-badge load-badge-${stage}`}
+            title={stageLabel ?? undefined}
+            aria-label={stageLabel ?? undefined}
+          >
+            <LoadStageIcon stage={stage} />
+          </span>
+        ) : null}
       </span>
       {!collapsed ? (
         <>
           <span className="profile-meta">
-            <span className="profile-name">{profile.name}</span>
+            <span className="profile-name" title={stageLabel ?? undefined}>
+              {profile.name}
+            </span>
             <span className="profile-shortcut">{shortcut || null}</span>
           </span>
           {!detached ? (
@@ -446,6 +496,79 @@ function ProfileRow({
         </>
       ) : null}
     </div>
+  )
+}
+
+function LoadStageIcon({ stage }: { stage: LoadStage }): JSX.Element {
+  if (stage === 'queued') {
+    return (
+      <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
+        <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M6 3.8v2.5l1.7 1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (stage === 'starting' || stage === 'loading') {
+    return (
+      <svg className="load-spinner" viewBox="0 0 12 12" width="10" height="10" aria-hidden>
+        <circle
+          cx="6"
+          cy="6"
+          r="4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeDasharray="16 8"
+        />
+      </svg>
+    )
+  }
+  if (stage === 'signing-in') {
+    return (
+      <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
+        <path
+          d="M5 6.5h5.2M8.4 4.6 10.3 6.5 8.4 8.4M5 3.2V2.4A1.4 1.4 0 0 0 3.6 1H2.4A1.4 1.4 0 0 0 1 2.4v7.2A1.4 1.4 0 0 0 2.4 11h1.2A1.4 1.4 0 0 0 5 9.6V8.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    )
+  }
+  if (stage === 'failed') {
+    return (
+      <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
+        <path
+          d="M3.2 3.2 8.8 8.8M8.8 3.2 3.2 8.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
+      <path
+        d="M2.4 6.2 4.8 8.6 9.6 3.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

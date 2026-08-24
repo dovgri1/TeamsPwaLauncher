@@ -24,7 +24,12 @@ import {
   setSidebarCollapsed,
   setStageBounds,
   setUnreadHandler,
+  setLoadStageHandler,
+  getLoadStageMap,
+  clearQueuedLoadStages,
   showProfile,
+  ensureView,
+  preloadProfiles,
   syncBounds,
   toggleActiveDevTools,
   chromeUserAgent,
@@ -35,7 +40,12 @@ import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } 
 import { sanitizeProfileUrl } from '../shared/teamsUrls'
 
 let mainWindow: BrowserWindow | null = null
-let store: ProfileStore = { profiles: [], activeProfileId: null, sidebarCollapsed: false }
+let store: ProfileStore = {
+  profiles: [],
+  activeProfileId: null,
+  sidebarCollapsed: false,
+  loadAllProfiles: false
+}
 let unread: UnreadMap = {}
 let detachedIds: string[] = []
 
@@ -87,6 +97,9 @@ app.whenReady().then(() => {
     unread = next
     mainWindow?.webContents.send('unread:changed', unread)
     updateWindowTitle()
+  })
+  setLoadStageHandler((next) => {
+    mainWindow?.webContents.send('loadStage:changed', next)
   })
   setDetachedChangeHandler((ids) => {
     detachedIds = ids
@@ -223,8 +236,13 @@ function registerIpc(): void {
   })
   ipcMain.handle('detached:list', () => getDetachedIds())
   ipcMain.handle('unread:list', () => getUnreadMap())
+  ipcMain.handle('loadStage:list', () => getLoadStageMap())
   ipcMain.handle('ui:setSidebarCollapsed', (_event, collapsed: boolean) => {
     applySidebarCollapsed(collapsed)
+    return store
+  })
+  ipcMain.handle('ui:setLoadAllProfiles', (_event, enabled: boolean) => {
+    applyLoadAllProfiles(enabled)
     return store
   })
   ipcMain.on('ui:stageBounds', (event, bounds: { x: number; y: number; width: number; height: number }) => {
@@ -297,6 +315,9 @@ function createProfile(input: CreateProfileInput): ProfileStore {
   }
   persist()
   showProfile(profile)
+  if (store.loadAllProfiles) {
+    ensureView(profile)
+  }
   broadcast()
   updateWindowTitle()
   return store
@@ -413,11 +434,15 @@ async function switchProfile(id: string): Promise<ProfileStore> {
 }
 
 function restoreActiveProfile(): void {
-  const profile = store.profiles.find((item) => item.id === store.activeProfileId)
-  if (profile) {
-    showProfile(profile)
+  if (store.loadAllProfiles) {
+    preloadProfiles(store.profiles, store.activeProfileId)
   } else {
-    hideAllViews()
+    const profile = store.profiles.find((item) => item.id === store.activeProfileId)
+    if (profile) {
+      showProfile(profile)
+    } else {
+      hideAllViews()
+    }
   }
   updateWindowTitle()
 }
@@ -430,6 +455,18 @@ function applySidebarCollapsed(collapsed: boolean): void {
   store = { ...store, sidebarCollapsed: collapsed }
   persist()
   setSidebarCollapsed(collapsed)
+  broadcast()
+  applyAppMenu()
+}
+
+function applyLoadAllProfiles(enabled: boolean): void {
+  store = { ...store, loadAllProfiles: enabled }
+  persist()
+  if (enabled) {
+    preloadProfiles(store.profiles, store.activeProfileId)
+  } else {
+    clearQueuedLoadStages()
+  }
   broadcast()
   applyAppMenu()
 }
@@ -530,6 +567,12 @@ function buildAppMenu(): Menu {
           label: store.sidebarCollapsed ? 'Show tenant sidebar' : 'Hide tenant sidebar',
           accelerator: 'CmdOrCtrl+B',
           click: () => applySidebarCollapsed(!store.sidebarCollapsed)
+        },
+        {
+          label: 'Load all tenants on startup',
+          type: 'checkbox',
+          checked: store.loadAllProfiles,
+          click: () => applyLoadAllProfiles(!store.loadAllProfiles)
         },
         {
           label: 'Detach active tenant',

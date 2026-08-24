@@ -26,9 +26,14 @@ export function loadStore(): ProfileStore {
         ? data.activeProfileId
         : (profiles[0]?.id ?? null)
 
-    return { profiles, activeProfileId, sidebarCollapsed: Boolean(data.sidebarCollapsed) }
+    return {
+      profiles,
+      activeProfileId,
+      sidebarCollapsed: Boolean(data.sidebarCollapsed),
+      loadAllProfiles: Boolean(data.loadAllProfiles)
+    }
   } catch {
-    return { profiles: [], activeProfileId: null, sidebarCollapsed: false }
+    return { profiles: [], activeProfileId: null, sidebarCollapsed: false, loadAllProfiles: false }
   }
 }
 

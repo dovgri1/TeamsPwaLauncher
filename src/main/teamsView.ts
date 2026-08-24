@@ -15,22 +15,33 @@ import { pickDisplaySource } from './screenPicker'
 import {
   SIDEBAR_COLLAPSED_WIDTH,
   SIDEBAR_WIDTH,
+  type LoadStage,
+  type LoadStageMap,
   type Profile,
   type UnreadBadge,
   type UnreadMap
 } from '../shared/types'
-import { isAllowedTeamsUrl, isSafeExternalUrl, isTeamsDiagnosticsUrl, sanitizeProfileUrl } from '../shared/teamsUrls'
+import {
+  isAllowedTeamsUrl,
+  isMicrosoftLoginHost,
+  isSafeExternalUrl,
+  isTeamsAppHost,
+  isTeamsDiagnosticsUrl,
+  sanitizeProfileUrl
+} from '../shared/teamsUrls'
 
 const views = new Map<string, WebContentsView>()
 const popouts = new Map<string, BrowserWindow>()
 const configuredSessions = new Set<string>()
 const titleUnread = new Map<string, UnreadBadge>()
 const badgeUnread = new Map<string, number>()
+const loadStages = new Map<string, LoadStage>()
 
 let mainWindow: BrowserWindow | null = null
 let activeProfileId: string | null = null
 let onSwitchIndex: ((index: number) => void) | null = null
 let onUnreadChange: ((unread: UnreadMap) => void) | null = null
+let onLoadStageChange: ((stages: LoadStageMap) => void) | null = null
 let onToggleSidebar: (() => void) | null = null
 let onDetachedChange: ((ids: string[]) => void) | null = null
 let onActiveCleared: (() => void) | null = null
@@ -72,12 +83,29 @@ const BADGE_SCRIPT = `(() => {
   emit(parse(document.title));
 })();`
 
+const VISIBILITY_SCRIPT = `(() => {
+  if (window.__teamsLauncherForceVisible) return;
+  window.__teamsLauncherForceVisible = true;
+  try {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  } catch {}
+})();`
+
 export function setSwitchIndexHandler(handler: (index: number) => void): void {
   onSwitchIndex = handler
 }
 
 export function setUnreadHandler(handler: (unread: UnreadMap) => void): void {
   onUnreadChange = handler
+}
+
+export function setLoadStageHandler(handler: (stages: LoadStageMap) => void): void {
+  onLoadStageChange = handler
+}
+
+export function getLoadStageMap(): LoadStageMap {
+  return Object.fromEntries(loadStages)
 }
 
 export function setToggleSidebarHandler(handler: () => void): void {
@@ -153,14 +181,17 @@ export function initTeamsViews(win: BrowserWindow): void {
   }
 }
 
-export function showProfile(profile: Profile): void {
+const LOAD_READY_IDLE_MS = 2_000
+const initialLoadStarted = new WeakSet<WebContents>()
+let preloadGeneration = 0
+
+export function ensureView(profile: Profile): WebContentsView | null {
   if (!mainWindow) {
-    return
+    return null
   }
 
   if (popouts.has(profile.id)) {
-    focusDetached(profile.id)
-    return
+    return views.get(profile.id) ?? null
   }
 
   let view = views.get(profile.id)
@@ -172,16 +203,74 @@ export function showProfile(profile: Profile): void {
     mainWindow.contentView.addChildView(view)
   }
 
-  for (const [id, existing] of views) {
-    if (popouts.has(id)) {
+  if (profile.id === activeProfileId) {
+    presentView(view, true)
+  } else {
+    parkView(view)
+    raiseActiveView()
+  }
+
+  return view
+}
+
+export function preloadProfiles(profiles: Profile[], activeId: string | null): void {
+  const generation = ++preloadGeneration
+  const active = profiles.find((profile) => profile.id === activeId) ?? null
+
+  if (active && !popouts.has(active.id)) {
+    showProfile(active)
+  } else if (!active) {
+    hideAllViews()
+  }
+
+  const remaining = profiles.filter(
+    (profile) => profile.id !== active?.id && !views.has(profile.id) && !popouts.has(profile.id)
+  )
+  for (const profile of remaining) {
+    setLoadStage(profile.id, 'queued')
+  }
+  startParallelPreload(generation, remaining)
+}
+
+function startParallelPreload(generation: number, remaining: Profile[]): void {
+  for (const profile of remaining) {
+    if (generation !== preloadGeneration) {
+      return
+    }
+    if (views.has(profile.id) || popouts.has(profile.id)) {
       continue
     }
-    existing.setVisible(id === profile.id)
+    ensureView(profile)
+  }
+  raiseActiveView()
+}
+
+function hasLoadedTeamsPage(contents: WebContents): boolean {
+  if (contents.isDestroyed()) {
+    return false
+  }
+  const url = contents.getURL()
+  return Boolean(url) && url !== 'about:blank'
+}
+
+export function showProfile(profile: Profile): void {
+  if (!mainWindow) {
+    return
+  }
+
+  if (popouts.has(profile.id)) {
+    focusDetached(profile.id)
+    return
+  }
+
+  const view = ensureView(profile)
+  if (!view) {
+    return
   }
 
   activeProfileId = profile.id
-  view.setVisible(true)
-  syncActiveBounds()
+  layoutEmbeddedViews({ raiseActive: true })
+  ensureLoaded(view, profile)
   view.webContents.focus()
 }
 
@@ -198,8 +287,80 @@ export function hideEmbeddedViews(): void {
   }
 }
 
+function presentView(view: WebContentsView, raise = false): void {
+  const bounds = stageViewBounds()
+  if (bounds) {
+    applyViewBounds(view, bounds)
+  }
+  view.setVisible(true)
+  if (raise && mainWindow && isViewInMain(view)) {
+    try {
+      mainWindow.contentView.addChildView(view)
+    } catch {
+      // Already the top child.
+    }
+  }
+}
+
+function parkView(view: WebContentsView): void {
+  const bounds = stageViewBounds()
+  if (bounds) {
+    applyViewBounds(view, bounds)
+  }
+  view.setVisible(true)
+}
+
+function raiseActiveView(): void {
+  if (!activeProfileId || popouts.has(activeProfileId)) {
+    return
+  }
+  const view = views.get(activeProfileId)
+  if (view) {
+    presentView(view, true)
+  }
+}
+
+function layoutEmbeddedViews(options?: { raiseActive?: boolean }): void {
+  for (const [id, view] of views) {
+    if (popouts.has(id) || id === activeProfileId) {
+      continue
+    }
+    parkView(view)
+  }
+  if (!activeProfileId || popouts.has(activeProfileId)) {
+    return
+  }
+  const active = views.get(activeProfileId)
+  if (active) {
+    presentView(active, Boolean(options?.raiseActive))
+  }
+}
+
+function ensureLoaded(view: WebContentsView, profile: Profile): void {
+  if (view.webContents.isDestroyed() || view.webContents.isLoading()) {
+    return
+  }
+  if (!hasLoadedTeamsPage(view.webContents)) {
+    void beginInitialLoad(view, profile)
+  }
+}
+
 export function reloadProfile(id: string): void {
+  setLoadStage(id, 'loading')
   views.get(id)?.webContents.reload()
+}
+
+export function clearQueuedLoadStages(): void {
+  let changed = false
+  for (const [id, stage] of loadStages) {
+    if (stage === 'queued' && !views.has(id)) {
+      loadStages.delete(id)
+      changed = true
+    }
+  }
+  if (changed) {
+    publishLoadStages()
+  }
 }
 
 export function toggleActiveDevTools(): void {
@@ -212,11 +373,9 @@ export function detachProfile(profile: Profile): void {
     return
   }
 
-  let view = views.get(profile.id)
+  const view = ensureView(profile)
   if (!view) {
-    view = createView(profile)
-    views.set(profile.id, view)
-    mainWindow.contentView.addChildView(view)
+    return
   }
 
   mainWindow.contentView.removeChildView(view)
@@ -315,18 +474,11 @@ function reattachView(id: string, makeActive: boolean): void {
   }
 
   if (makeActive) {
-    for (const [otherId, existing] of views) {
-      if (popouts.has(otherId)) {
-        continue
-      }
-      existing.setVisible(otherId === id)
-    }
     activeProfileId = id
-    view.setVisible(true)
-    syncActiveBounds()
+    layoutEmbeddedViews({ raiseActive: true })
     view.webContents.focus()
   } else {
-    view.setVisible(false)
+    parkView(view)
   }
 }
 
@@ -373,7 +525,9 @@ async function tearDownProfileView(id: string): Promise<void> {
 
   titleUnread.delete(id)
   badgeUnread.delete(id)
+  loadStages.delete(id)
   publishUnread(true)
+  publishLoadStages()
 }
 
 async function clearProfilePartition(id: string): Promise<void> {
@@ -489,19 +643,133 @@ function createView(profile: Profile): WebContentsView {
 
   configureSession(view.webContents.session, profile.id)
   view.webContents.setUserAgent(chromeUserAgent())
+  view.webContents.setBackgroundThrottling(false)
   attachUnreadTracking(profile.id, view.webContents)
   attachLoginRecovery(view.webContents, profile)
-  view.setVisible(false)
-  void (async () => {
-    const pickAccount = await partitionHasNoCookies(profile.id)
-    if (view.webContents.isDestroyed()) {
+  attachLoadTracking(profile.id, view.webContents)
+  setLoadStage(profile.id, 'starting')
+  parkView(view)
+  void beginInitialLoad(view, profile)
+  return view
+}
+
+async function beginInitialLoad(view: WebContentsView, profile: Profile): Promise<void> {
+  const pickAccount = await partitionHasNoCookies(profile.id)
+  if (view.webContents.isDestroyed()) {
+    return
+  }
+  initialLoadStarted.add(view.webContents)
+  setLoadStage(profile.id, 'loading')
+  void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount }))
+}
+
+function attachLoadTracking(profileId: string, contents: WebContents): void {
+  let readyTimer: ReturnType<typeof setTimeout> | null = null
+
+  const clearReadyTimer = (): void => {
+    if (readyTimer) {
+      clearTimeout(readyTimer)
+      readyTimer = null
+    }
+  }
+
+  const applyNavigation = (): void => {
+    if (contents.isDestroyed()) {
       return
     }
-    void view.webContents.loadURL(
-      teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount })
-    )
-  })()
-  return view
+    const kind = classifyLoadUrl(contents.getURL())
+    if (kind === 'signing-in') {
+      clearReadyTimer()
+      setLoadStage(profileId, 'signing-in')
+      return
+    }
+    if (loadStages.get(profileId) === 'ready') {
+      return
+    }
+    if (kind === 'app' || kind === 'other') {
+      setLoadStage(profileId, 'loading')
+    }
+  }
+
+  const armReady = (): void => {
+    if (contents.isDestroyed()) {
+      return
+    }
+    const kind = classifyLoadUrl(contents.getURL())
+    if (kind === 'signing-in') {
+      clearReadyTimer()
+      setLoadStage(profileId, 'signing-in')
+      return
+    }
+    if (kind !== 'app') {
+      return
+    }
+    clearReadyTimer()
+    readyTimer = setTimeout(() => {
+      readyTimer = null
+      if (contents.isDestroyed() || contents.isLoading()) {
+        return
+      }
+      if (classifyLoadUrl(contents.getURL()) === 'app') {
+        setLoadStage(profileId, 'ready')
+      }
+    }, LOAD_READY_IDLE_MS)
+  }
+
+  const injectVisibility = (): void => {
+    void contents.executeJavaScript(VISIBILITY_SCRIPT, true).catch(() => undefined)
+  }
+
+  contents.on('dom-ready', injectVisibility)
+  contents.on('did-start-loading', () => {
+    clearReadyTimer()
+    if (loadStages.get(profileId) === 'ready') {
+      return
+    }
+    applyNavigation()
+  })
+  contents.on('did-navigate', applyNavigation)
+  contents.on('did-stop-loading', armReady)
+  contents.on('did-finish-load', () => {
+    injectVisibility()
+    armReady()
+  })
+  contents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) {
+      clearReadyTimer()
+      setLoadStage(profileId, 'failed')
+    }
+  })
+}
+
+function classifyLoadUrl(url: string): 'signing-in' | 'app' | 'other' | 'blank' {
+  if (!url || url === 'about:blank') {
+    return 'blank'
+  }
+  try {
+    const host = new URL(url).hostname
+    if (isMicrosoftLoginHost(host)) {
+      return 'signing-in'
+    }
+    if (isTeamsAppHost(host)) {
+      return 'app'
+    }
+  } catch {
+    return 'other'
+  }
+  return 'other'
+}
+
+function setLoadStage(id: string, stage: LoadStage): void {
+  if (loadStages.get(id) === stage) {
+    return
+  }
+  loadStages.set(id, stage)
+  publishLoadStages()
+}
+
+function publishLoadStages(): void {
+  onLoadStageChange?.(getLoadStageMap())
 }
 
 function configureSession(ses: Session, profileId: string): void {
@@ -958,29 +1226,26 @@ function isViewInMain(view: WebContentsView): boolean {
   return children.includes(view)
 }
 
-function syncActiveBounds(): void {
+function stageViewBounds(): { x: number; y: number; width: number; height: number } | null {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    return
-  }
-
-  const view = activeEmbeddedView()
-  if (!view) {
-    return
+    return null
   }
 
   const [width, height] = mainWindow.getContentSize()
   const htmlFullscreen = mainWindow.isFullScreen() || mainWindow.isSimpleFullScreen()
-  const bounds =
-    !htmlFullscreen && stageBounds
-      ? stageBounds
-      : {
-          x: htmlFullscreen ? 0 : sidebarOffset,
-          y: 0,
-          width: Math.max(0, width - (htmlFullscreen ? 0 : sidebarOffset)),
-          height
-        }
+  if (!htmlFullscreen && stageBounds) {
+    return stageBounds
+  }
+  return {
+    x: htmlFullscreen ? 0 : sidebarOffset,
+    y: 0,
+    width: Math.max(0, width - (htmlFullscreen ? 0 : sidebarOffset)),
+    height
+  }
+}
 
-  applyViewBounds(view, bounds)
+function syncActiveBounds(): void {
+  layoutEmbeddedViews()
 }
 
 function syncPopoutBounds(id: string): void {
@@ -1028,8 +1293,8 @@ function roundBounds(bounds: {
     return null
   }
   return {
-    x: Math.max(0, Math.round(bounds.x)),
-    y: Math.max(0, Math.round(bounds.y)),
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
     width: Math.max(0, Math.round(bounds.width)),
     height: Math.max(0, Math.round(bounds.height))
   }

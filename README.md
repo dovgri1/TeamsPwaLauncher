@@ -19,7 +19,7 @@ This app embeds the official [Microsoft Teams web](https://teams.microsoft.com) 
 
 - **Named tenants** — Work, Personal, Client A, … with custom colors and icons  
 - **Isolated logins** — each profile uses a separate Chromium partition (`persist:<id>`)  
-- **Unread badges** — see notification counts per tenant in the sidebar  
+- **Unread badges** — see notification counts per tenant in the sidebar (only for loaded tenants; enable **Load all on startup** in the sidebar, or **View → Load all tenants on startup**)  
 - **Detachable windows** — keep a call in a pop-out while messaging in another tenant  
 - **Screen share picker** — choose which monitor or window to share  
 - **Collapsible sidebar** — icon rail when collapsed, full tenant list when expanded (`Ctrl+B` / `⌘B`)  
