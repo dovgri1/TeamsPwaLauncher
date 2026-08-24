@@ -26,7 +26,6 @@ import {
   setUnreadHandler,
   setLoadStageHandler,
   getLoadStageMap,
-  clearQueuedLoadStages,
   showProfile,
   ensureView,
   preloadProfiles,
@@ -464,8 +463,6 @@ function applyLoadAllProfiles(enabled: boolean): void {
   persist()
   if (enabled) {
     preloadProfiles(store.profiles, store.activeProfileId)
-  } else {
-    clearQueuedLoadStages()
   }
   broadcast()
   applyAppMenu()

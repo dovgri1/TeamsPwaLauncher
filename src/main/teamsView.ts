@@ -181,7 +181,7 @@ export function initTeamsViews(win: BrowserWindow): void {
   }
 }
 
-const LOAD_READY_IDLE_MS = 2_000
+const LOAD_READY_IDLE_MS = 3_000
 const initialLoadStarted = new WeakSet<WebContents>()
 let preloadGeneration = 0
 
@@ -226,9 +226,6 @@ export function preloadProfiles(profiles: Profile[], activeId: string | null): v
   const remaining = profiles.filter(
     (profile) => profile.id !== active?.id && !views.has(profile.id) && !popouts.has(profile.id)
   )
-  for (const profile of remaining) {
-    setLoadStage(profile.id, 'queued')
-  }
   startParallelPreload(generation, remaining)
 }
 
@@ -348,19 +345,6 @@ function ensureLoaded(view: WebContentsView, profile: Profile): void {
 export function reloadProfile(id: string): void {
   setLoadStage(id, 'loading')
   views.get(id)?.webContents.reload()
-}
-
-export function clearQueuedLoadStages(): void {
-  let changed = false
-  for (const [id, stage] of loadStages) {
-    if (stage === 'queued' && !views.has(id)) {
-      loadStages.delete(id)
-      changed = true
-    }
-  }
-  if (changed) {
-    publishLoadStages()
-  }
 }
 
 export function toggleActiveDevTools(): void {
@@ -647,7 +631,6 @@ function createView(profile: Profile): WebContentsView {
   attachUnreadTracking(profile.id, view.webContents)
   attachLoginRecovery(view.webContents, profile)
   attachLoadTracking(profile.id, view.webContents)
-  setLoadStage(profile.id, 'starting')
   parkView(view)
   void beginInitialLoad(view, profile)
   return view
@@ -661,6 +644,14 @@ async function beginInitialLoad(view: WebContentsView, profile: Profile): Promis
   initialLoadStarted.add(view.webContents)
   setLoadStage(profile.id, 'loading')
   void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount }))
+}
+
+function isSplashTitle(title: string): boolean {
+  const value = title.trim()
+  if (!value || /^microsoft teams$/i.test(value)) {
+    return true
+  }
+  return /just another minute|getting things ready|still working|taking longer/i.test(value)
 }
 
 function attachLoadTracking(profileId: string, contents: WebContents): void {
@@ -691,6 +682,17 @@ function attachLoadTracking(profileId: string, contents: WebContents): void {
     }
   }
 
+  const tryMarkReady = (): void => {
+    if (contents.isDestroyed() || contents.isLoading()) {
+      return
+    }
+    if (classifyLoadUrl(contents.getURL()) !== 'app' || isSplashTitle(contents.getTitle())) {
+      return
+    }
+    setLoadStage(profileId, 'ready')
+    clearReadyTimer()
+  }
+
   const armReady = (): void => {
     if (contents.isDestroyed()) {
       return
@@ -707,12 +709,7 @@ function attachLoadTracking(profileId: string, contents: WebContents): void {
     clearReadyTimer()
     readyTimer = setTimeout(() => {
       readyTimer = null
-      if (contents.isDestroyed() || contents.isLoading()) {
-        return
-      }
-      if (classifyLoadUrl(contents.getURL()) === 'app') {
-        setLoadStage(profileId, 'ready')
-      }
+      tryMarkReady()
     }, LOAD_READY_IDLE_MS)
   }
 
@@ -730,6 +727,12 @@ function attachLoadTracking(profileId: string, contents: WebContents): void {
   })
   contents.on('did-navigate', applyNavigation)
   contents.on('did-stop-loading', armReady)
+  contents.on('page-title-updated', () => {
+    if (loadStages.get(profileId) === 'ready') {
+      return
+    }
+    tryMarkReady()
+  })
   contents.on('did-finish-load', () => {
     injectVisibility()
     armReady()

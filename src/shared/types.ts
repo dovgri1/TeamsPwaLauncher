@@ -98,15 +98,7 @@ export type UnreadBadge = {
 
 export type UnreadMap = Record<string, UnreadBadge>
 
-export const LOAD_STAGES = [
-  'idle',
-  'queued',
-  'starting',
-  'loading',
-  'signing-in',
-  'ready',
-  'failed'
-] as const
+export const LOAD_STAGES = ['idle', 'loading', 'signing-in', 'ready', 'failed'] as const
 
 export type LoadStage = (typeof LOAD_STAGES)[number]
 

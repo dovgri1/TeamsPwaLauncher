@@ -386,8 +386,6 @@ export default function App(): JSX.Element {
 
 const LOAD_STAGE_LABEL: Record<LoadStage, string> = {
   idle: 'Not loaded',
-  queued: 'Waiting to load',
-  starting: 'Starting…',
   loading: 'Loading Teams…',
   'signing-in': 'Signing in…',
   ready: 'Loaded',
@@ -500,22 +498,7 @@ function ProfileRow({
 }
 
 function LoadStageIcon({ stage }: { stage: LoadStage }): JSX.Element {
-  if (stage === 'queued') {
-    return (
-      <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden>
-        <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path
-          d="M6 3.8v2.5l1.7 1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    )
-  }
-  if (stage === 'starting' || stage === 'loading') {
+  if (stage === 'loading') {
     return (
       <svg className="load-spinner" viewBox="0 0 12 12" width="10" height="10" aria-hidden>
         <circle

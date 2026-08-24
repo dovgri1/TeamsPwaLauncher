@@ -338,12 +338,6 @@ button {
   color: #f3f2f1;
 }
 
-.load-badge-queued {
-  background: #3b3a39;
-  color: #d2d0ce;
-}
-
-.load-badge-starting,
 .load-badge-loading {
   background: #3b2e6b;
   color: #c5b8ff;
