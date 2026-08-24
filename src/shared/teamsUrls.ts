@@ -24,7 +24,11 @@ const ALLOWED_HOSTS = [
   /(?:^|\.)dynamics\.com$/i,
   /(?:^|\.)dynamics365\.com$/i,
   /(?:^|\.)powerapps\.com$/i,
+  /(?:^|\.)powerappsusercontent\.com$/i,
   /(?:^|\.)powerplatform\.com$/i,
+  /(?:^|\.)powerplatformusercontent\.com$/i,
+  /(?:^|\.)creatorsdk\.azure\.com$/i,
+  /(?:^|\.)msteamstabintegration\.dynamics\.com$/i,
   /(?:^|\.)windows\.net$/i,
   /(?:^|\.)microsoftazuread-sso\.com$/i,
   /(?:^|\.)msidentity\.com$/i,
@@ -33,7 +37,13 @@ const ALLOWED_HOSTS = [
   /(?:^|\.)msecnd\.net$/i,
   /(?:^|\.)azure\.net$/i,
   /(?:^|\.)akamaized\.net$/i,
-  /(?:^|\.)akamaihd\.net$/i
+  /(?:^|\.)akamaihd\.net$/i,
+  /(?:^|\.)azurewebsites\.net$/i,
+  /(?:^|\.)azurestaticapps\.net$/i,
+  /(?:^|\.)officeapps\.live\.com$/i,
+  /(?:^|\.)onedrive\.com$/i,
+  /(?:^|\.)1drv\.com$/i,
+  /(?:^|\.)aka\.ms$/i
 ]
 
 export function isAllowedTeamsUrl(url: string): boolean {
@@ -49,6 +59,33 @@ export function isAllowedTeamsUrl(url: string): boolean {
   }
 
   return ALLOWED_HOSTS.some((pattern) => pattern.test(parsed.hostname))
+}
+
+/** https/wss and in-page schemes safe to load inside Teams iframes and popups. */
+export function isEmbeddedWebContentUrl(url: string): boolean {
+  if (!url.trim()) {
+    return true
+  }
+
+  if (
+    url === 'about:blank' ||
+    url.startsWith('about:blank?') ||
+    url.startsWith('about:blank#') ||
+    url.startsWith('about:srcdoc') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:')
+  ) {
+    return true
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+
+  return parsed.protocol === 'https:' || parsed.protocol === 'wss:'
 }
 
 /** Only https/mailto/tel may leave the app via the OS handler. */

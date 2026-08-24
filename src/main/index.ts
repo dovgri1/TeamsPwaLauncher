@@ -52,6 +52,9 @@ app.setPath('userData', join(app.getPath('appData'), 'teams-pwa-launcher'))
 
 const disabledFeatures = [
   'ThirdPartyStoragePartitioning',
+  'ThirdPartyCookieBlocking',
+  'TrackingProtection3pcd',
+  'CookieDeprecationFacilitatedTesting',
   'UserAgentClientHint',
   'WebAuthentication',
   'WebAuthenticationConditionalUI'

@@ -23,6 +23,7 @@ import {
 } from '../shared/types'
 import {
   isAllowedTeamsUrl,
+  isEmbeddedWebContentUrl,
   isMicrosoftLoginHost,
   isSafeExternalUrl,
   isTeamsAppHost,
@@ -538,10 +539,16 @@ export function attachAppWebContentsHandlers(): void {
     contents.on('will-navigate', (event, url) => {
       handleNavigation(event, contents, url)
     })
-    contents.on('will-redirect', (event, url) => {
-      handleNavigation(event, contents, url)
+    contents.on('will-redirect', (event) => {
+      if (!event.isMainFrame) {
+        return
+      }
+      handleNavigation(event, contents, event.url)
     })
     contents.on('will-frame-navigate', (event) => {
+      if (!event.isMainFrame) {
+        return
+      }
       handleNavigation(event, contents, event.url)
     })
     contents.on('context-menu', (_event, params) => {
@@ -994,24 +1001,20 @@ function attachSignInHelpers(contents: WebContents): void {
     if (contents.isDestroyed() || contents === mainWindow?.webContents) {
       return
     }
+    if (!isMicrosoftLoginUrl(contents.getURL())) {
+      return
+    }
     void contents.executeJavaScript(SIGNIN_HELPER).catch(() => undefined)
   }
 
   contents.on('dom-ready', inject)
   contents.on('did-finish-load', inject)
-  contents.on('frame-created', (_event, details) => {
-    const frame = details.frame
-    if (!frame || frame.isDestroyed()) {
-      return
-    }
-    void frame.executeJavaScript(SIGNIN_HELPER).catch(() => undefined)
-  })
 }
 
 function attachLoginRecovery(contents: WebContents, profile: Profile): void {
   let recoveries = 0
   contents.on('did-finish-load', () => {
-    if (contents.isDestroyed() || recoveries >= 2) {
+    if (contents.isDestroyed() || recoveries >= 2 || !isMicrosoftLoginUrl(contents.getURL())) {
       return
     }
     void contents
@@ -1040,6 +1043,17 @@ export function chromeUserAgent(): string {
   return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`
 }
 
+function isMicrosoftLoginUrl(url: string): boolean {
+  if (!url || url === 'about:blank') {
+    return false
+  }
+  try {
+    return isMicrosoftLoginHost(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
 function isAllowedPermission(permission: string): boolean {
   return [
     'media',
@@ -1052,6 +1066,7 @@ function isAllowedPermission(permission: string): boolean {
     'pointerLock',
     'idle-detection',
     'storage-access',
+    'top-level-storage-access',
     'window-management'
   ].includes(permission)
 }
@@ -1081,30 +1096,41 @@ function handleWindowOpen(
     }
   }
 
+  const popupOptions = teamsPopupWindowOptions(contents)
+
+  if (isTeamsGuestContents(contents) && isEmbeddedWebContentUrl(details.url)) {
+    return { action: 'allow', overrideBrowserWindowOptions: popupOptions }
+  }
+
   if (isAllowedTeamsUrl(details.url) || details.url === 'about:blank' || details.url.startsWith('about:blank?')) {
-    return {
-      action: 'allow',
-      overrideBrowserWindowOptions: {
-        width: 1100,
-        height: 800,
-        minWidth: 640,
-        minHeight: 480,
-        autoHideMenuBar: true,
-        backgroundColor: '#201F1E',
-        useContentSize: true,
-        webPreferences: {
-          session: contents.session,
-          sandbox: true,
-          contextIsolation: true,
-          nodeIntegration: false,
-          spellcheck: true
-        }
-      }
-    }
+    return { action: 'allow', overrideBrowserWindowOptions: popupOptions }
   }
 
   void openExternalSafely(details.url)
   return { action: 'deny' }
+}
+
+function isTeamsGuestContents(contents: WebContents): boolean {
+  return contents !== mainWindow?.webContents
+}
+
+function teamsPopupWindowOptions(contents: WebContents): Electron.BrowserWindowConstructorOptions {
+  return {
+    width: 1100,
+    height: 800,
+    minWidth: 640,
+    minHeight: 480,
+    autoHideMenuBar: true,
+    backgroundColor: '#201F1E',
+    useContentSize: true,
+    webPreferences: {
+      session: contents.session,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      spellcheck: true
+    }
+  }
 }
 
 function isAppRendererUrl(contents: WebContents, url: string): boolean {
