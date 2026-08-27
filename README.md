@@ -201,6 +201,10 @@ Reinstalling the app does **not** remove this folder. Delete it yourself only if
 
 The app does **not** save Microsoft account passwords. Stay-signed-in comes from cookies and tokens already in that folder. `profiles.json` only stores names, colors, and icons.
 
+### Diagnostics logs
+
+Startup, tenant load stages, navigations, failed loads, and Teams console warnings/errors are written as JSON lines under `logs/` in that folder (for example `logs/launcher-2026-08-26.log`). Open them from **View → Open logs folder** or **View → Reveal current log**. Auth tokens in URLs are redacted. Logs older than 14 days are pruned automatically.
+
 ## Privacy & security
 
 - Logins stay on your machine in isolated browser partitions (cookies and tokens, not stored passwords).  

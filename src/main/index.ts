@@ -35,6 +35,7 @@ import {
   switchAccount,
   flushProfileSessions
 } from './teamsView'
+import { initLogger, log, openLogsFolder, revealCurrentLog } from './logger'
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
 import { sanitizeProfileUrl } from '../shared/teamsUrls'
 
@@ -74,6 +75,27 @@ app.userAgentFallback = chromeUserAgent()
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
+} else {
+  process.on('uncaughtException', (error) => {
+    try {
+      log('error', 'app', 'uncaught-exception', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      })
+    } catch {
+      console.error(error)
+    }
+  })
+  process.on('unhandledRejection', (reason) => {
+    try {
+      log('error', 'app', 'unhandled-rejection', {
+        reason: reason instanceof Error ? { name: reason.name, message: reason.message, stack: reason.stack } : String(reason)
+      })
+    } catch {
+      console.error(reason)
+    }
+  })
 }
 
 attachAppWebContentsHandlers()
@@ -83,8 +105,14 @@ app.whenReady().then(() => {
     return
   }
 
+  initLogger()
   electronApp.setAppUserModelId('com.domestiquesolutions.teamspwalauncher')
   store = loadStore()
+  log('info', 'app', 'ready', {
+    profiles: store.profiles.map((profile) => ({ id: profile.id, name: profile.name })),
+    activeProfileId: store.activeProfileId,
+    loadAllProfiles: store.loadAllProfiles
+  })
   setSidebarCollapsed(store.sidebarCollapsed)
   setSwitchIndexHandler((index) => {
     const profile = store.profiles[index]
@@ -464,6 +492,7 @@ function applySidebarCollapsed(collapsed: boolean): void {
 function applyLoadAllProfiles(enabled: boolean): void {
   store = { ...store, loadAllProfiles: enabled }
   persist()
+  log('info', 'app', 'set-load-all-profiles', { enabled })
   if (enabled) {
     preloadProfiles(store.profiles, store.activeProfileId)
   }
@@ -585,6 +614,18 @@ function buildAppMenu(): Menu {
           }
         },
         { type: 'separator' },
+        {
+          label: 'Open logs folder',
+          click: () => {
+            void openLogsFolder()
+          }
+        },
+        {
+          label: 'Reveal current log',
+          click: () => {
+            void revealCurrentLog()
+          }
+        },
         {
           label: 'Toggle Teams DevTools',
           accelerator: 'CmdOrCtrl+Shift+I',

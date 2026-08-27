@@ -30,6 +30,7 @@ import {
   isTeamsDiagnosticsUrl,
   sanitizeProfileUrl
 } from '../shared/teamsUrls'
+import { log, sanitizeUrlish } from './logger'
 
 const views = new Map<string, WebContentsView>()
 const popouts = new Map<string, BrowserWindow>()
@@ -183,13 +184,43 @@ export function initTeamsViews(win: BrowserWindow): void {
 }
 
 const LOAD_READY_IDLE_MS = 3_000
-const initialLoadStarted = new WeakSet<WebContents>()
+const PRELOAD_STAGGER_MS = 2_500
+const RECOVERY_DELAY_MS = 2_000
+const MAX_AUTO_RECOVERIES = 2
+const RECOVERABLE_FAIL_CODES = new Set([-21]) // ERR_NETWORK_CHANGED
+const loadInFlight = new WeakSet<WebContents>()
+const loadStartedAt = new Map<string, number>()
+const profileById = new Map<string, Profile>()
+const recoveryAttempts = new Map<string, number>()
+const recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let preloadGeneration = 0
+
+function trackProfile(profile: Profile): void {
+  profileById.set(profile.id, profile)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function elapsedMs(profileId: string): number | undefined {
+  const started = loadStartedAt.get(profileId)
+  return started == null ? undefined : Date.now() - started
+}
+
+function markLoadStarted(profileId: string, reason: string): void {
+  if (!loadStartedAt.has(profileId)) {
+    loadStartedAt.set(profileId, Date.now())
+  }
+  log('info', 'load', 'load-started', { profileId, reason })
+}
 
 export function ensureView(profile: Profile): WebContentsView | null {
   if (!mainWindow) {
     return null
   }
+
+  trackProfile(profile)
 
   if (popouts.has(profile.id)) {
     return views.get(profile.id) ?? null
@@ -197,6 +228,7 @@ export function ensureView(profile: Profile): WebContentsView | null {
 
   let view = views.get(profile.id)
   if (!view) {
+    log('info', 'view', 'create-view', { profileId: profile.id, name: profile.name })
     view = createView(profile)
     views.set(profile.id, view)
     mainWindow.contentView.addChildView(view)
@@ -217,6 +249,15 @@ export function ensureView(profile: Profile): WebContentsView | null {
 export function preloadProfiles(profiles: Profile[], activeId: string | null): void {
   const generation = ++preloadGeneration
   const active = profiles.find((profile) => profile.id === activeId) ?? null
+  const remaining = profiles.filter(
+    (profile) => profile.id !== active?.id && !views.has(profile.id) && !popouts.has(profile.id)
+  )
+  log('info', 'load', 'preload-start', {
+    generation,
+    activeId,
+    total: profiles.length,
+    remaining: remaining.map((profile) => ({ id: profile.id, name: profile.name }))
+  })
 
   if (active && !popouts.has(active.id)) {
     showProfile(active)
@@ -224,23 +265,84 @@ export function preloadProfiles(profiles: Profile[], activeId: string | null): v
     hideAllViews()
   }
 
-  const remaining = profiles.filter(
-    (profile) => profile.id !== active?.id && !views.has(profile.id) && !popouts.has(profile.id)
-  )
-  startParallelPreload(generation, remaining)
+  startStaggeredPreload(generation, remaining)
 }
 
-function startParallelPreload(generation: number, remaining: Profile[]): void {
-  for (const profile of remaining) {
-    if (generation !== preloadGeneration) {
+function startStaggeredPreload(generation: number, remaining: Profile[]): void {
+  void (async () => {
+    for (const profile of remaining) {
+      if (generation !== preloadGeneration) {
+        return
+      }
+      if (views.has(profile.id) || popouts.has(profile.id)) {
+        continue
+      }
+      ensureView(profile)
+      startProfileLoad(profile, 'preload-stagger')
+      raiseActiveView()
+      if (generation !== preloadGeneration) {
+        return
+      }
+      await delay(PRELOAD_STAGGER_MS)
+    }
+    raiseActiveView()
+  })()
+}
+
+function startProfileLoad(profile: Profile, reason: string): void {
+  const view = views.get(profile.id)
+  if (!view) {
+    return
+  }
+  void beginInitialLoad(view, profile, reason)
+}
+
+function clearRecoveryState(profileId: string): void {
+  recoveryAttempts.delete(profileId)
+  const timer = recoveryTimers.get(profileId)
+  if (timer) {
+    clearTimeout(timer)
+    recoveryTimers.delete(profileId)
+  }
+}
+
+function scheduleAutoRecovery(profileId: string, reason: string, delayMs = RECOVERY_DELAY_MS): void {
+  const attempts = recoveryAttempts.get(profileId) ?? 0
+  if (attempts >= MAX_AUTO_RECOVERIES) {
+    log('warn', 'load', 'auto-recover-give-up', { profileId, reason, attempts })
+    setLoadStage(profileId, 'failed')
+    return
+  }
+
+  const existing = recoveryTimers.get(profileId)
+  if (existing) {
+    clearTimeout(existing)
+  }
+
+  log('info', 'load', 'auto-recover-scheduled', { profileId, reason, attempt: attempts + 1, delayMs })
+  setLoadStage(profileId, 'loading')
+
+  const timer = setTimeout(() => {
+    recoveryTimers.delete(profileId)
+    recoveryAttempts.set(profileId, attempts + 1)
+
+    const profile = profileById.get(profileId)
+    const view = views.get(profileId)
+    if (!profile || !view || view.webContents.isDestroyed()) {
       return
     }
-    if (views.has(profile.id) || popouts.has(profile.id)) {
-      continue
+
+    log('info', 'load', 'auto-recover', { profileId, reason, attempt: attempts + 1 })
+    markLoadStarted(profileId, `recover:${reason}`)
+    setLoadStage(profileId, 'loading')
+
+    if (hasLoadedTeamsPage(view.webContents)) {
+      view.webContents.reload()
+    } else {
+      void beginInitialLoad(view, profile, `recover:${reason}`)
     }
-    ensureView(profile)
-  }
-  raiseActiveView()
+  }, delayMs)
+  recoveryTimers.set(profileId, timer)
 }
 
 function hasLoadedTeamsPage(contents: WebContents): boolean {
@@ -267,6 +369,12 @@ export function showProfile(profile: Profile): void {
   }
 
   activeProfileId = profile.id
+  log('info', 'view', 'show-profile', {
+    profileId: profile.id,
+    name: profile.name,
+    stage: loadStages.get(profile.id) ?? 'idle',
+    url: sanitizeUrlish(view.webContents.getURL())
+  })
   layoutEmbeddedViews({ raiseActive: true })
   ensureLoaded(view, profile)
   view.webContents.focus()
@@ -335,15 +443,18 @@ function layoutEmbeddedViews(options?: { raiseActive?: boolean }): void {
 }
 
 function ensureLoaded(view: WebContentsView, profile: Profile): void {
+  trackProfile(profile)
   if (view.webContents.isDestroyed() || view.webContents.isLoading()) {
     return
   }
   if (!hasLoadedTeamsPage(view.webContents)) {
-    void beginInitialLoad(view, profile)
+    void beginInitialLoad(view, profile, 'ensure-loaded')
   }
 }
 
 export function reloadProfile(id: string): void {
+  clearRecoveryState(id)
+  markLoadStarted(id, 'reload')
   setLoadStage(id, 'loading')
   views.get(id)?.webContents.reload()
 }
@@ -511,8 +622,12 @@ async function tearDownProfileView(id: string): Promise<void> {
   titleUnread.delete(id)
   badgeUnread.delete(id)
   loadStages.delete(id)
+  loadStartedAt.delete(id)
+  profileById.delete(id)
+  clearRecoveryState(id)
   publishUnread(true)
   publishLoadStages()
+  log('info', 'view', 'teardown', { profileId: id })
 }
 
 async function clearProfilePartition(id: string): Promise<void> {
@@ -603,6 +718,10 @@ function handleNavigation(
     return
   }
   event.preventDefault()
+  log('info', 'nav', 'open-external', {
+    url: sanitizeUrlish(url),
+    from: sanitizeUrlish(contents.getURL())
+  })
   openExternalSafely(url)
 }
 
@@ -639,18 +758,60 @@ function createView(profile: Profile): WebContentsView {
   attachLoginRecovery(view.webContents, profile)
   attachLoadTracking(profile.id, view.webContents)
   parkView(view)
-  void beginInitialLoad(view, profile)
   return view
 }
 
-async function beginInitialLoad(view: WebContentsView, profile: Profile): Promise<void> {
-  const pickAccount = await partitionHasNoCookies(profile.id)
-  if (view.webContents.isDestroyed()) {
+async function beginInitialLoad(
+  view: WebContentsView,
+  profile: Profile,
+  reason: string
+): Promise<void> {
+  const contents = view.webContents
+  if (contents.isDestroyed()) {
     return
   }
-  initialLoadStarted.add(view.webContents)
-  setLoadStage(profile.id, 'loading')
-  void view.webContents.loadURL(teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount }))
+  if (loadInFlight.has(contents)) {
+    log('debug', 'load', 'load-skipped-in-flight', { profileId: profile.id, reason })
+    return
+  }
+  if (contents.isLoading()) {
+    log('debug', 'load', 'load-skipped-already-loading', { profileId: profile.id, reason })
+    return
+  }
+  if (hasLoadedTeamsPage(contents) && !reason.startsWith('recover') && reason !== 'reload') {
+    return
+  }
+
+  loadInFlight.add(contents)
+  try {
+    const pickAccount =
+      reason !== 'reload' && !reason.startsWith('recover')
+        ? await partitionHasNoCookies(profile.id)
+        : false
+    if (contents.isDestroyed()) {
+      return
+    }
+
+    markLoadStarted(profile.id, pickAccount ? `${reason}-empty-partition` : reason)
+    setLoadStage(profile.id, 'loading')
+    const url = teamsEntryUrl(sanitizeProfileUrl(profile.url), { pickAccount })
+    log('info', 'load', 'load-url', {
+      profileId: profile.id,
+      name: profile.name,
+      reason,
+      pickAccount,
+      url: sanitizeUrlish(url)
+    })
+    await contents.loadURL(url)
+  } catch (error) {
+    log('error', 'load', 'load-url-failed', {
+      profileId: profile.id,
+      reason,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  } finally {
+    loadInFlight.delete(contents)
+  }
 }
 
 function isSplashTitle(title: string): boolean {
@@ -663,6 +824,7 @@ function isSplashTitle(title: string): boolean {
 
 function attachLoadTracking(profileId: string, contents: WebContents): void {
   let readyTimer: ReturnType<typeof setTimeout> | null = null
+  let lastLoggedUrl = ''
 
   const clearReadyTimer = (): void => {
     if (readyTimer) {
@@ -675,7 +837,18 @@ function attachLoadTracking(profileId: string, contents: WebContents): void {
     if (contents.isDestroyed()) {
       return
     }
-    const kind = classifyLoadUrl(contents.getURL())
+    const url = contents.getURL()
+    const kind = classifyLoadUrl(url)
+    if (url !== lastLoggedUrl) {
+      lastLoggedUrl = url
+      log('info', 'nav', 'navigate', {
+        profileId,
+        kind,
+        url: sanitizeUrlish(url),
+        title: contents.getTitle(),
+        elapsedMs: elapsedMs(profileId)
+      })
+    }
     if (kind === 'signing-in') {
       clearReadyTimer()
       setLoadStage(profileId, 'signing-in')
@@ -733,22 +906,87 @@ function attachLoadTracking(profileId: string, contents: WebContents): void {
     applyNavigation()
   })
   contents.on('did-navigate', applyNavigation)
+  contents.on('did-navigate-in-page', (_event, url) => {
+    log('debug', 'nav', 'navigate-in-page', {
+      profileId,
+      url: sanitizeUrlish(url),
+      elapsedMs: elapsedMs(profileId)
+    })
+  })
   contents.on('did-stop-loading', armReady)
-  contents.on('page-title-updated', () => {
+  contents.on('page-title-updated', (_event, title) => {
     if (loadStages.get(profileId) === 'ready') {
       return
     }
+    log('debug', 'load', 'title-updated', {
+      profileId,
+      title,
+      splash: isSplashTitle(title),
+      elapsedMs: elapsedMs(profileId)
+    })
     tryMarkReady()
   })
   contents.on('did-finish-load', () => {
     injectVisibility()
+    log('info', 'load', 'did-finish-load', {
+      profileId,
+      url: sanitizeUrlish(contents.getURL()),
+      title: contents.getTitle(),
+      elapsedMs: elapsedMs(profileId)
+    })
     armReady()
   })
-  contents.on('did-fail-load', (_event, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) {
+  contents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
+    if (code === -3) {
+      return
+    }
+    log(isMainFrame ? 'error' : 'warn', 'load', 'did-fail-load', {
+      profileId,
+      code,
+      description,
+      isMainFrame,
+      url: sanitizeUrlish(validatedURL),
+      elapsedMs: elapsedMs(profileId)
+    })
+    if (isMainFrame) {
       clearReadyTimer()
+      if (RECOVERABLE_FAIL_CODES.has(code) || description === 'ERR_NETWORK_CHANGED') {
+        scheduleAutoRecovery(profileId, 'network-changed')
+        return
+      }
       setLoadStage(profileId, 'failed')
     }
+  })
+  contents.on('render-process-gone', (_event, details) => {
+    log('error', 'load', 'render-process-gone', {
+      profileId,
+      reason: details.reason,
+      exitCode: details.exitCode,
+      elapsedMs: elapsedMs(profileId)
+    })
+    scheduleAutoRecovery(profileId, `render-gone:${details.reason}`, 3_000)
+  })
+  contents.on('unresponsive', () => {
+    log('warn', 'load', 'unresponsive', { profileId, elapsedMs: elapsedMs(profileId) })
+  })
+  contents.on('responsive', () => {
+    log('info', 'load', 'responsive', { profileId, elapsedMs: elapsedMs(profileId) })
+  })
+  contents.on('console-message', (event) => {
+    const level = event.level
+    if (level !== 'warning' && level !== 'error') {
+      return
+    }
+    const text = String(event.message || '')
+    if (text.startsWith('__TEAMS_BADGE__:')) {
+      return
+    }
+    log(level === 'error' ? 'error' : 'warn', 'guest-console', level, {
+      profileId,
+      message: text.length > 500 ? `${text.slice(0, 500)}…` : text,
+      line: event.lineNumber,
+      source: sanitizeUrlish(String(event.sourceId || ''))
+    })
   })
 }
 
@@ -774,7 +1012,20 @@ function setLoadStage(id: string, stage: LoadStage): void {
   if (loadStages.get(id) === stage) {
     return
   }
+  const previous = loadStages.get(id) ?? 'idle'
   loadStages.set(id, stage)
+  log('info', 'load', 'stage', {
+    profileId: id,
+    from: previous,
+    to: stage,
+    elapsedMs: elapsedMs(id)
+  })
+  if (stage === 'ready') {
+    clearRecoveryState(id)
+    loadStartedAt.delete(id)
+  } else if (stage === 'failed') {
+    loadStartedAt.delete(id)
+  }
   publishLoadStages()
 }
 
@@ -1099,13 +1350,25 @@ function handleWindowOpen(
   const popupOptions = teamsPopupWindowOptions(contents)
 
   if (isTeamsGuestContents(contents) && isEmbeddedWebContentUrl(details.url)) {
+    log('info', 'nav', 'popup-allow', {
+      url: sanitizeUrlish(details.url),
+      disposition: details.disposition
+    })
     return { action: 'allow', overrideBrowserWindowOptions: popupOptions }
   }
 
   if (isAllowedTeamsUrl(details.url) || details.url === 'about:blank' || details.url.startsWith('about:blank?')) {
+    log('info', 'nav', 'popup-allow', {
+      url: sanitizeUrlish(details.url),
+      disposition: details.disposition
+    })
     return { action: 'allow', overrideBrowserWindowOptions: popupOptions }
   }
 
+  log('info', 'nav', 'popup-external', {
+    url: sanitizeUrlish(details.url),
+    disposition: details.disposition
+  })
   void openExternalSafely(details.url)
   return { action: 'deny' }
 }
