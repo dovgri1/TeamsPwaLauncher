@@ -47,10 +47,16 @@ let onLoadStageChange: ((stages: LoadStageMap) => void) | null = null
 let onToggleSidebar: (() => void) | null = null
 let onDetachedChange: ((ids: string[]) => void) | null = null
 let onActiveCleared: (() => void) | null = null
+let onOpenPalette: (() => void) | null = null
+let onClosePalette: (() => void) | null = null
+let onRunShortcutAction: ((actionId: string) => void) | null = null
+let paletteOpen = false
+let formOverlayOpen = false
 let unreadPoll: ReturnType<typeof setInterval> | null = null
 let sidebarOffset = SIDEBAR_WIDTH
 let stageBounds: { x: number; y: number; width: number; height: number } | null = null
 const guestResizeTimers = new WeakMap<WebContents, ReturnType<typeof setTimeout>>()
+const composingByContents = new WeakMap<WebContents, boolean>()
 
 const BADGE_SCRIPT = `(() => {
   if (window.__teamsLauncherBadgeHook) return;
@@ -94,6 +100,249 @@ const VISIBILITY_SCRIPT = `(() => {
   } catch {}
 })();`
 
+const TEAMS_HELPER_SCRIPT = `(() => {
+  if (window.__teamsLauncherComposeHook) return;
+  window.__teamsLauncherComposeHook = true;
+
+  const emit = (on) => console.log('__TEAMS_COMPOSE__:' + (on ? '1' : '0'));
+
+  const clickEl = (el) => {
+    if (!el) return false;
+    try {
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+      el.click();
+      return true;
+    } catch {
+      try { el.click(); return true; } catch { return false; }
+    }
+  };
+
+  const looksLikeSearch = (el) => {
+    if (!el) return false;
+    const aria = ((el.getAttribute && el.getAttribute('aria-label')) || el.placeholder || '').toLowerCase();
+    if (/search|filter|find|lookup/.test(aria)) return true;
+    let node = el;
+    for (let i = 0; i < 6 && node; i++) {
+      const label = ((node.getAttribute && node.getAttribute('aria-label')) || node.getAttribute?.('data-tid') || '').toLowerCase();
+      if (/search|filter|command.?bar/.test(label)) return true;
+      node = node.parentElement;
+    }
+    return false;
+  };
+
+  const looksLikeCompose = (el) => {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    const editable =
+      el.isContentEditable ||
+      el.getAttribute?.('contenteditable') === 'true' ||
+      el.getAttribute?.('role') === 'textbox' ||
+      tag === 'textarea' ||
+      (tag === 'input' && !/button|checkbox|radio|submit|file|hidden|range|color/.test(el.type || ''));
+    if (!editable) return false;
+    if (looksLikeSearch(el)) return false;
+    const aria = ((el.getAttribute && el.getAttribute('aria-label')) || el.placeholder || '').toLowerCase();
+    if (/type a message|write a message|new message|compose|send a message|chat message|message/.test(aria)) {
+      return true;
+    }
+    let node = el;
+    for (let i = 0; i < 8 && node; i++) {
+      const tid = (node.getAttribute?.('data-tid') || node.id || node.className || '').toString().toLowerCase();
+      if (/compose|ck-editor|editor-input|message-input|chat-input|new-message/.test(tid)) return true;
+      node = node.parentElement;
+    }
+    return true;
+  };
+
+  const findCompose = () => {
+    const selectors = [
+      '[data-tid="ckeditor-text-input"]',
+      '[data-tid="message-compose"]',
+      '[aria-label*="Type a message" i]',
+      '[aria-label*="Write a message" i]',
+      '[aria-placeholder*="Type a message" i]',
+      'div[role="textbox"][contenteditable="true"]',
+      'div[contenteditable="true"][aria-label]'
+    ];
+    for (const sel of selectors) {
+      try {
+        const nodes = document.querySelectorAll(sel);
+        for (const node of nodes) {
+          if (looksLikeCompose(node)) return node;
+        }
+      } catch {}
+    }
+    return null;
+  };
+
+  const ariaMatch = (el, needles) => {
+    const label = (
+      (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title'))) ||
+      el.textContent ||
+      ''
+    ).trim().toLowerCase();
+    return needles.some((n) => label === n || label.startsWith(n + ' ') || label.includes(n));
+  };
+
+  const findRailButton = (needles) => {
+    const candidates = document.querySelectorAll(
+      'button[aria-label], a[aria-label], [role="button"][aria-label], [role="tab"][aria-label], [data-tid][aria-label]'
+    );
+    for (const el of candidates) {
+      if (ariaMatch(el, needles)) return el;
+    }
+    return null;
+  };
+
+  window.__teamsLauncherIsComposing = () => looksLikeCompose(document.activeElement);
+  window.__teamsLauncherFocusCompose = () => {
+    const el = findCompose();
+    if (!el) return false;
+    try {
+      el.focus({ preventScroll: false });
+      el.click?.();
+    } catch {
+      try { el.focus(); } catch {}
+    }
+    emit(looksLikeCompose(document.activeElement));
+    return looksLikeCompose(document.activeElement);
+  };
+
+  window.__teamsLauncherOpenPane = (pane) => {
+    const map = {
+      chat: ['chat', 'chats'],
+      teams: ['teams', 'teams and channels'],
+      activity: ['activity', 'notifications', 'notification'],
+      calendar: ['calendar']
+    };
+    const needles = map[pane] || [String(pane || '').toLowerCase()];
+    const el = findRailButton(needles);
+    return clickEl(el);
+  };
+
+  window.__teamsLauncherFocusSearch = () => {
+    const selectors = [
+      '#ms-searchux-search-box',
+      'input[aria-label*="Search" i]',
+      'input[placeholder*="Search" i]',
+      '[data-tid="search-input-field"]',
+      '[role="search"] input',
+      'button[aria-label*="Search" i]'
+    ];
+    for (const sel of selectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        clickEl(el);
+        if (el.focus) {
+          try { el.focus(); } catch {}
+        }
+        return true;
+      } catch {}
+    }
+    const rail = findRailButton(['search']);
+    return clickEl(rail);
+  };
+
+  const railNoise =
+    /^(chat|chats|teams|activity|notifications?|calendar|calls|files|apps|search|home|more|settings|help|new chat|meet|copilot)$/i;
+
+  const rowTitle = (node) => {
+    const labelled = node.getAttribute?.('aria-label');
+    if (labelled && labelled.trim()) return labelled.replace(/\\s+/g, ' ').trim();
+    const titleNode =
+      node.querySelector?.('[data-tid*="title"]') ||
+      node.querySelector?.('[data-tid*="name"]') ||
+      node.querySelector?.('span[title]') ||
+      node.querySelector?.('[title]');
+    const fromChild = titleNode?.getAttribute?.('title') || titleNode?.textContent || '';
+    if (fromChild.trim()) return fromChild.replace(/\\s+/g, ' ').trim();
+    // Prefer first non-empty text line, not the entire subtree dump.
+    const text = (node.innerText || node.textContent || '').replace(/\\s+/g, ' ').trim();
+    return text.split(/\\n/)[0]?.trim() || text;
+  };
+
+  const collectChatRows = () => {
+    const selectors = [
+      '[data-tid="chat-list-item"]',
+      '[data-tid="chat-space-item"]',
+      '[data-tid*="chat-list"] [role="treeitem"]',
+      '[data-tid*="chat-list"] [role="option"]',
+      '[data-tid*="chat-list"] [role="listitem"]',
+      '[data-tid*="channel-list"] [role="treeitem"]',
+      '[data-tid*="team-channel"]',
+      '[data-tid*="channel-item"]',
+      '[role="treeitem"]',
+      '[role="option"]',
+      '[role="listitem"]'
+    ];
+    const seen = new Set();
+    const rows = [];
+    for (const sel of selectors) {
+      let nodes;
+      try { nodes = document.querySelectorAll(sel); } catch { continue; }
+      for (const node of nodes) {
+        if (!(node instanceof HTMLElement)) continue;
+        // Prefer visible rows, but still accept attached nodes (parked views).
+        if (node.getClientRects && node.getClientRects().length === 0 && !node.offsetParent) continue;
+        let title = rowTitle(node);
+        if (!title || title.length < 2 || title.length > 140) continue;
+        // Strip trailing unread counts like "Alice 3" / "(3)".
+        title = title.replace(/\\s+\\(?\\d+\\+?\\)?\\s*$/, '').trim();
+        if (!title || railNoise.test(title)) continue;
+        const key = title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const meta = (
+          (node.getAttribute('data-tid') || '') +
+          ' ' +
+          (node.className || '')
+        ).toLowerCase();
+        const kind =
+          /channel|team/.test(meta) || /\\s[|/]\\s/.test(title) || title.includes('/')
+            ? 'channel'
+            : 'chat';
+        rows.push({ el: node, title, kind });
+        if (rows.length >= 40) return rows;
+      }
+    }
+    return rows;
+  };
+
+  window.__teamsLauncherListChats = () => {
+    const rows = collectChatRows();
+    window.__teamsLauncherLastChatTitles = rows.map((row) => row.title);
+    return rows.map((row, index) => ({ index, title: row.title, kind: row.kind }));
+  };
+
+  window.__teamsLauncherOpenChatByTitle = (title) => {
+    const want = String(title || '').trim().toLowerCase();
+    if (!want) return false;
+    const rows = collectChatRows();
+    const exact = rows.find((row) => row.title.toLowerCase() === want);
+    if (exact) return clickEl(exact.el);
+    const partial = rows.find(
+      (row) => row.title.toLowerCase().includes(want) || want.includes(row.title.toLowerCase())
+    );
+    return partial ? clickEl(partial.el) : false;
+  };
+
+  window.__teamsLauncherOpenChatAt = (index) => {
+    const titles = window.__teamsLauncherLastChatTitles || [];
+    const title = titles[Number(index)];
+    if (title) return window.__teamsLauncherOpenChatByTitle(title);
+    const rows = collectChatRows();
+    const row = rows[Number(index)];
+    return row ? clickEl(row.el) : false;
+  };
+
+  const sync = () => emit(window.__teamsLauncherIsComposing());
+  document.addEventListener('focusin', sync, true);
+  document.addEventListener('focusout', sync, true);
+  sync();
+})();`
+
 export function setSwitchIndexHandler(handler: (index: number) => void): void {
   onSwitchIndex = handler
 }
@@ -120,6 +369,31 @@ export function setDetachedChangeHandler(handler: (ids: string[]) => void): void
 
 export function setActiveClearedHandler(handler: () => void): void {
   onActiveCleared = handler
+}
+
+export function setOpenPaletteHandler(handler: () => void): void {
+  onOpenPalette = handler
+}
+
+export function setClosePaletteHandler(handler: () => void): void {
+  onClosePalette = handler
+}
+
+export function setRunShortcutActionHandler(handler: (actionId: string) => void): void {
+  onRunShortcutAction = handler
+}
+
+export function setPaletteOpen(open: boolean): void {
+  paletteOpen = open
+}
+
+export function isPaletteOpen(): boolean {
+  return paletteOpen
+}
+
+/** Profile add/edit modal (or any shell overlay that uses ui:formOpen). */
+export function setFormOverlayOpen(open: boolean): void {
+  formOverlayOpen = open
 }
 
 export function setSidebarCollapsed(collapsed: boolean): void {
@@ -460,7 +734,85 @@ export function reloadProfile(id: string): void {
 }
 
 export function toggleActiveDevTools(): void {
-  activeEmbeddedView()?.webContents.toggleDevTools()
+  focusedTeamsContents()?.toggleDevTools()
+}
+
+async function ensureTeamsHelper(contents: WebContents): Promise<boolean> {
+  if (contents.isDestroyed()) {
+    return false
+  }
+  try {
+    await contents.executeJavaScript(TEAMS_HELPER_SCRIPT, true)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runTeamsHelper<T>(expression: string): Promise<T | null> {
+  const contents = focusedTeamsContents()
+  if (!contents || contents.isDestroyed()) {
+    return null
+  }
+  await ensureTeamsHelper(contents)
+  try {
+    return (await contents.executeJavaScript(expression, true)) as T
+  } catch {
+    return null
+  }
+}
+
+/** Focus the Teams message compose box in the focused/active Teams view. */
+export async function focusCompose(): Promise<boolean> {
+  return Boolean(await runTeamsHelper('window.__teamsLauncherFocusCompose()'))
+}
+
+export async function openTeamsPane(
+  pane: 'chat' | 'teams' | 'activity' | 'calendar'
+): Promise<boolean> {
+  return Boolean(
+    await runTeamsHelper(`window.__teamsLauncherOpenPane(${JSON.stringify(pane)})`)
+  )
+}
+
+export async function focusTeamsSearch(): Promise<boolean> {
+  return Boolean(await runTeamsHelper('window.__teamsLauncherFocusSearch()'))
+}
+
+export type TeamsRecentChat = {
+  index: number
+  title: string
+  kind: 'chat' | 'channel' | 'unknown'
+}
+
+let lastListedChats: TeamsRecentChat[] = []
+
+export async function listTeamsRecentChats(): Promise<TeamsRecentChat[]> {
+  const result = await runTeamsHelper<TeamsRecentChat[]>('window.__teamsLauncherListChats()')
+  if (!Array.isArray(result)) {
+    lastListedChats = []
+    return []
+  }
+  lastListedChats = result
+    .filter((item) => item && typeof item.title === 'string')
+    .map((item, index) => ({
+      index: typeof item.index === 'number' ? item.index : index,
+      title: String(item.title),
+      kind: item.kind === 'channel' || item.kind === 'chat' ? item.kind : 'unknown'
+    }))
+  return lastListedChats
+}
+
+export async function openTeamsChatAt(index: number): Promise<boolean> {
+  const listed = lastListedChats[index]
+  if (listed?.title) {
+    return Boolean(
+      await runTeamsHelper(
+        `window.__teamsLauncherOpenChatByTitle(${JSON.stringify(listed.title)})`
+      )
+    )
+  }
+  return Boolean(await runTeamsHelper(`window.__teamsLauncherOpenChatAt(${Number(index) || 0})`))
 }
 
 export function detachProfile(profile: Profile): void {
@@ -673,7 +1025,7 @@ export function attachAppWebContentsHandlers(): void {
       showTeamsContextMenu(contents, params)
     })
     contents.on('before-input-event', (event, input) => {
-      handleShortcut(event, input)
+      handleShortcut(event, input, contents)
     })
     contents.on('did-create-window', (win) => {
       const ping = (): void => notifyGuestResize(win.webContents)
@@ -1377,6 +1729,18 @@ function isTeamsGuestContents(contents: WebContents): boolean {
   return contents !== mainWindow?.webContents
 }
 
+function isProfileTeamsView(contents: WebContents): boolean {
+  if (contents.isDestroyed()) {
+    return false
+  }
+  for (const view of views.values()) {
+    if (view.webContents === contents) {
+      return true
+    }
+  }
+  return false
+}
+
 function teamsPopupWindowOptions(contents: WebContents): Electron.BrowserWindowConstructorOptions {
   return {
     width: 1100,
@@ -1452,12 +1816,64 @@ function showTeamsContextMenu(contents: WebContents, params: Electron.ContextMen
   Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined })
 }
 
-function handleShortcut(event: Electron.Event, input: Electron.Input): void {
+function handleShortcut(event: Electron.Event, input: Electron.Input, contents: WebContents): void {
   if (input.type !== 'keyDown') {
     return
   }
 
   const ctrl = input.control || input.meta
+  const isMainRenderer = contents === mainWindow?.webContents
+  const isProfileView = isProfileTeamsView(contents)
+
+  if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 'k') {
+    // Only from shell or profile Teams views — not login/auth popups.
+    if (isMainRenderer || isProfileView) {
+      event.preventDefault()
+      requestOpenPalette()
+    }
+    return
+  }
+
+  // Bare "t" opens the command palette when not typing in compose (profile view or shell).
+  if (
+    !ctrl &&
+    !input.alt &&
+    !input.meta &&
+    !input.control &&
+    input.key.toLowerCase() === 't' &&
+    !input.isAutoRepeat
+  ) {
+    if (paletteOpen || formOverlayOpen) {
+      return
+    }
+    if (!isMainRenderer && !isProfileView) {
+      return
+    }
+    if (isProfileView && composingByContents.get(contents)) {
+      return
+    }
+    event.preventDefault()
+    requestOpenPalette()
+    return
+  }
+
+  if (paletteOpen) {
+    if (input.key === 'Escape') {
+      event.preventDefault()
+      onClosePalette?.()
+      return
+    }
+    if (!isMainRenderer) {
+      // Keep typing/navigation on the shell palette, not the hidden Teams view.
+      event.preventDefault()
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.focus()
+      }
+      return
+    }
+    // Renderer owns other keys while the palette is open.
+    return
+  }
 
   if (ctrl && !input.shift && !input.alt && /^[1-9]$/.test(input.key)) {
     event.preventDefault()
@@ -1484,6 +1900,18 @@ function handleShortcut(event: Electron.Event, input: Electron.Input): void {
     return
   }
 
+  if (ctrl && input.shift && !input.alt && input.key.toLowerCase() === 'd') {
+    event.preventDefault()
+    onRunShortcutAction?.('tenant.detach')
+    return
+  }
+
+  if (ctrl && input.shift && !input.alt && input.key.toLowerCase() === 'a') {
+    event.preventDefault()
+    onRunShortcutAction?.('tenant.reattach')
+    return
+  }
+
   if (ctrl && input.shift && input.key.toLowerCase() === 'i') {
     event.preventDefault()
     const focused = BrowserWindow.getFocusedWindow()
@@ -1501,6 +1929,30 @@ function handleShortcut(event: Electron.Event, input: Electron.Input): void {
     event.preventDefault()
     mainWindow?.webContents.toggleDevTools()
   }
+}
+
+function requestOpenPalette(): void {
+  if (paletteOpen) {
+    return
+  }
+  onOpenPalette?.()
+}
+
+function focusedTeamsContents(): WebContents | undefined {
+  const focusedWin = BrowserWindow.getFocusedWindow()
+  for (const [id, win] of popouts) {
+    if (win === focusedWin) {
+      const view = views.get(id)
+      if (view && !view.webContents.isDestroyed()) {
+        return view.webContents
+      }
+    }
+  }
+  const embedded = activeEmbeddedView()
+  if (embedded && !embedded.webContents.isDestroyed()) {
+    return embedded.webContents
+  }
+  return undefined
 }
 
 function activeEmbeddedView(): WebContentsView | undefined {
@@ -1628,6 +2080,7 @@ function publishDetached(): void {
 function attachUnreadTracking(profileId: string, contents: WebContents): void {
   const inject = (): void => {
     void contents.executeJavaScript(BADGE_SCRIPT, true).catch(() => undefined)
+    void contents.executeJavaScript(TEAMS_HELPER_SCRIPT, true).catch(() => undefined)
   }
 
   contents.on('page-title-updated', (_event, title) => {
@@ -1642,6 +2095,11 @@ function attachUnreadTracking(profileId: string, contents: WebContents): void {
   })
   contents.on('console-message', (event, _level, message) => {
     const text = event.message || message
+    const composePrefix = '__TEAMS_COMPOSE__:'
+    if (text.startsWith(composePrefix)) {
+      composingByContents.set(contents, text.slice(composePrefix.length) === '1')
+      return
+    }
     const prefix = '__TEAMS_BADGE__:'
     if (!text.startsWith(prefix)) {
       return

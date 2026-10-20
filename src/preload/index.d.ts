@@ -24,6 +24,17 @@ export type TeamsLauncherApi = {
   setLoadAllProfiles: (enabled: boolean) => Promise<ProfileStore>
   setStageBounds: (bounds: { x: number; y: number; width: number; height: number }) => void
   setFormOpen: (open: boolean) => void
+  setPaletteOpen: (open: boolean) => void
+  runShortcut: (actionId: string) => Promise<boolean>
+  listRecentChats: () => Promise<
+    Array<{ index: number; title: string; kind: 'chat' | 'channel' | 'unknown' }>
+  >
+  onPaletteOpen: (
+    callback: (
+      recentChats?: Array<{ index: number; title: string; kind: 'chat' | 'channel' | 'unknown' }>
+    ) => void
+  ) => () => void
+  onPaletteClose: (callback: () => void) => () => void
   platform: NodeJS.Platform
   openContextMenu: (id: string) => void
   onChanged: (callback: (store: ProfileStore) => void) => () => void

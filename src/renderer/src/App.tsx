@@ -12,6 +12,8 @@ import {
   type UnreadMap
 } from '../../shared/types'
 import { ICON_CHOICES, ProfileIcon } from './ProfileIcon'
+import { CommandPalette } from './CommandPalette'
+import type { RecentChatItem } from '../../shared/shortcutActions'
 
 const emptyStore: ProfileStore = {
   profiles: [],
@@ -28,6 +30,8 @@ export default function App(): JSX.Element {
   const [loadStages, setLoadStages] = useState<LoadStageMap>({})
   const [detachedIds, setDetachedIds] = useState<string[]>([])
   const [formMode, setFormMode] = useState<'hidden' | 'add' | 'edit'>('hidden')
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteChats, setPaletteChats] = useState<RecentChatItem[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
   const [draftColor, setDraftColor] = useState<string>(PROFILE_COLORS[0])
@@ -93,7 +97,26 @@ export default function App(): JSX.Element {
   }, [store.profiles.length, store.sidebarCollapsed])
 
   useEffect(() => {
-    window.teamsLauncher.setFormOpen(formMode !== 'hidden')
+    window.teamsLauncher.setFormOpen(formMode !== 'hidden' || paletteOpen)
+    window.teamsLauncher.setPaletteOpen(paletteOpen)
+  }, [formMode, paletteOpen])
+
+  useEffect(() => {
+    const stopOpen = window.teamsLauncher.onPaletteOpen((recentChats) => {
+      if (formMode !== 'hidden') {
+        return
+      }
+      setPaletteChats(recentChats ?? [])
+      setPaletteOpen(true)
+    })
+    const stopClose = window.teamsLauncher.onPaletteClose(() => {
+      setPaletteOpen(false)
+      setPaletteChats([])
+    })
+    return () => {
+      stopOpen()
+      stopClose()
+    }
   }, [formMode])
 
   useEffect(() => {
@@ -291,6 +314,28 @@ export default function App(): JSX.Element {
           <div className="stage-fill" />
         )}
       </main>
+
+      <CommandPalette
+        open={paletteOpen}
+        profiles={store.profiles}
+        unread={unread}
+        detachedIds={detachedIds}
+        activeProfileId={store.activeProfileId}
+        recentChats={paletteChats}
+        modKey={modKey}
+        onClose={() => {
+          setPaletteOpen(false)
+          setPaletteChats([])
+        }}
+        onRun={(actionId) => {
+          setPaletteOpen(false)
+          setPaletteChats([])
+          // setTimeout runs after the setFormOpen(false) effect restores the Teams view.
+          window.setTimeout(() => {
+            void window.teamsLauncher.runShortcut(actionId)
+          }, 0)
+        }}
+      />
 
       {formMode !== 'hidden' ? (
         <div

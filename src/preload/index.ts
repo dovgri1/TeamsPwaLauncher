@@ -36,6 +36,38 @@ const teamsLauncher = {
   setFormOpen: (open: boolean): void => {
     ipcRenderer.send('ui:formOpen', open)
   },
+  setPaletteOpen: (open: boolean): void => {
+    ipcRenderer.send('shortcuts:setOpen', open)
+  },
+  runShortcut: (actionId: string): Promise<boolean> => ipcRenderer.invoke('shortcuts:run', actionId),
+  listRecentChats: (): Promise<
+    Array<{ index: number; title: string; kind: 'chat' | 'channel' | 'unknown' }>
+  > => ipcRenderer.invoke('shortcuts:listRecentChats'),
+  onPaletteOpen: (
+    callback: (
+      recentChats?: Array<{ index: number; title: string; kind: 'chat' | 'channel' | 'unknown' }>
+    ) => void
+  ): (() => void) => {
+    const listener = (
+      _event: IpcRendererEvent,
+      recentChats?: Array<{ index: number; title: string; kind: 'chat' | 'channel' | 'unknown' }>
+    ): void => {
+      callback(recentChats)
+    }
+    ipcRenderer.on('shortcuts:open', listener)
+    return () => {
+      ipcRenderer.removeListener('shortcuts:open', listener)
+    }
+  },
+  onPaletteClose: (callback: () => void): (() => void) => {
+    const listener = (): void => {
+      callback()
+    }
+    ipcRenderer.on('shortcuts:close', listener)
+    return () => {
+      ipcRenderer.removeListener('shortcuts:close', listener)
+    }
+  },
   platform: process.platform,
   openContextMenu: (id: string): void => {
     ipcRenderer.send('profiles:contextMenu', id)

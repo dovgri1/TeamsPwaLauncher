@@ -33,11 +33,22 @@ import {
   toggleActiveDevTools,
   chromeUserAgent,
   switchAccount,
-  flushProfileSessions
+  flushProfileSessions,
+  setOpenPaletteHandler,
+  setClosePaletteHandler,
+  setRunShortcutActionHandler,
+  setPaletteOpen,
+  setFormOverlayOpen,
+  focusCompose,
+  openTeamsPane,
+  focusTeamsSearch,
+  openTeamsChatAt,
+  listTeamsRecentChats
 } from './teamsView'
 import { initLogger, log, openLogsFolder, revealCurrentLog } from './logger'
 import type { CreateProfileInput, ProfileStore, UnreadMap, UpdateProfileInput } from '../shared/types'
 import { sanitizeProfileUrl } from '../shared/teamsUrls'
+import { parseChatOpenIndex, parseTenantSwitchId } from '../shared/shortcutActions'
 
 let mainWindow: BrowserWindow | null = null
 let store: ProfileStore = {
@@ -122,6 +133,15 @@ app.whenReady().then(() => {
   })
   setToggleSidebarHandler(() => {
     applySidebarCollapsed(!store.sidebarCollapsed)
+  })
+  setOpenPaletteHandler(() => {
+    openCommandPalette()
+  })
+  setClosePaletteHandler(() => {
+    closeCommandPalette()
+  })
+  setRunShortcutActionHandler((actionId) => {
+    void runShortcutAction(actionId)
   })
   setUnreadHandler((next) => {
     unread = next
@@ -285,14 +305,35 @@ function registerIpc(): void {
     if (event.sender !== mainWindow?.webContents) {
       return
     }
+    setFormOverlayOpen(open)
     if (open) {
       hideEmbeddedViews()
+      // Teams views can keep keyboard focus even when hidden — move it to the shell.
+      if (!mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.focus()
+      }
       return
     }
     const profile = store.profiles.find((item) => item.id === store.activeProfileId)
     if (profile && !isDetached(profile.id)) {
       showProfile(profile)
     }
+  })
+  ipcMain.on('shortcuts:setOpen', (event, open: boolean) => {
+    if (event.sender !== mainWindow?.webContents) {
+      return
+    }
+    setPaletteOpen(Boolean(open))
+    if (open && mainWindow && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.focus()
+    }
+  })
+  ipcMain.handle('shortcuts:run', async (_event, actionId: string) => {
+    await runShortcutAction(actionId)
+    return true
+  })
+  ipcMain.handle('shortcuts:listRecentChats', async () => {
+    return listTeamsRecentChats()
   })
   ipcMain.on('profiles:contextMenu', (event, id: string) => {
     const profile = store.profiles.find((item) => item.id === id)
@@ -463,6 +504,18 @@ async function switchProfile(id: string): Promise<ProfileStore> {
   return store
 }
 
+async function switchProfileRelative(delta: number): Promise<ProfileStore> {
+  const profiles = store.profiles
+  if (profiles.length === 0) {
+    return store
+  }
+
+  const currentIndex = profiles.findIndex((profile) => profile.id === store.activeProfileId)
+  const from = currentIndex >= 0 ? currentIndex : 0
+  const nextIndex = (from + delta + profiles.length * 10) % profiles.length
+  return switchProfile(profiles[nextIndex].id)
+}
+
 function restoreActiveProfile(): void {
   if (store.loadAllProfiles) {
     preloadProfiles(store.profiles, store.activeProfileId)
@@ -503,6 +556,125 @@ function applyLoadAllProfiles(enabled: boolean): void {
 function broadcast(): void {
   mainWindow?.webContents.send('profiles:changed', store)
   mainWindow?.webContents.send('detached:changed', getDetachedIds())
+}
+
+function openCommandPalette(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow.show()
+  mainWindow.focus()
+  // Scrape chats while the Teams view is still visible, then open the palette.
+  void listTeamsRecentChats().then((chats) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return
+    }
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.focus()
+    }
+    mainWindow.webContents.send('shortcuts:open', chats)
+  })
+}
+
+function closeCommandPalette(): void {
+  mainWindow?.webContents.send('shortcuts:close')
+}
+
+async function afterPaletteRestore(): Promise<void> {
+  // Palette close restores the Teams view via ui:formOpen; wait briefly for layout/focus.
+  await new Promise<void>((resolve) => setTimeout(resolve, 120))
+}
+
+async function runShortcutAction(actionId: string): Promise<void> {
+  const tenantId = parseTenantSwitchId(actionId)
+  if (tenantId) {
+    await switchProfile(tenantId)
+    return
+  }
+
+  const chatIndex = parseChatOpenIndex(actionId)
+  if (chatIndex !== null) {
+    await afterPaletteRestore()
+    await openTeamsChatAt(chatIndex)
+    return
+  }
+
+  switch (actionId) {
+    case 'tenant.next':
+      await switchProfileRelative(1)
+      return
+    case 'tenant.prev':
+      await switchProfileRelative(-1)
+      return
+    case 'sidebar.toggle':
+      applySidebarCollapsed(!store.sidebarCollapsed)
+      return
+    case 'tenant.reload':
+      if (store.activeProfileId) {
+        reloadProfile(store.activeProfileId)
+      }
+      return
+    case 'tenant.detach': {
+      const profile = store.profiles.find((item) => item.id === store.activeProfileId)
+      if (profile && !isDetached(profile.id)) {
+        detachProfile(profile)
+      }
+      return
+    }
+    case 'tenant.reattach': {
+      const id = store.activeProfileId
+      if (id && isDetached(id)) {
+        reattachProfile(id)
+        store = { ...store, activeProfileId: id }
+        persist()
+        broadcast()
+        updateWindowTitle()
+      } else if (detachedIds[0]) {
+        const first = detachedIds[0]
+        reattachProfile(first)
+        store = { ...store, activeProfileId: first }
+        persist()
+        broadcast()
+        updateWindowTitle()
+      }
+      return
+    }
+    case 'compose.focus':
+      await afterPaletteRestore()
+      await focusCompose()
+      return
+    case 'pane.chat':
+      await afterPaletteRestore()
+      await openTeamsPane('chat')
+      return
+    case 'pane.teams':
+      await afterPaletteRestore()
+      await openTeamsPane('teams')
+      return
+    case 'pane.activity':
+      await afterPaletteRestore()
+      await openTeamsPane('activity')
+      return
+    case 'pane.calendar':
+      await afterPaletteRestore()
+      await openTeamsPane('calendar')
+      return
+    case 'teams.search':
+      await afterPaletteRestore()
+      await focusTeamsSearch()
+      return
+    case 'devtools.teams':
+      toggleActiveDevTools()
+      return
+    case 'devtools.shell':
+      mainWindow?.webContents.toggleDevTools()
+      return
+    default:
+      log('warn', 'shortcuts', 'unknown-action', { actionId })
+  }
 }
 
 function updateWindowTitle(): void {
@@ -567,12 +739,31 @@ function buildAppMenu(): Menu {
       label: 'View',
       submenu: [
         {
+          label: 'Command palette',
+          accelerator: 'CmdOrCtrl+K',
+          click: () => openCommandPalette()
+        },
+        {
           label: 'Reload Teams',
           accelerator: 'CmdOrCtrl+R',
           click: () => {
             if (store.activeProfileId) {
               reloadProfile(store.activeProfileId)
             }
+          }
+        },
+        {
+          label: 'Previous tenant',
+          accelerator: 'CmdOrCtrl+Up',
+          click: () => {
+            void switchProfileRelative(-1)
+          }
+        },
+        {
+          label: 'Next tenant',
+          accelerator: 'CmdOrCtrl+Down',
+          click: () => {
+            void switchProfileRelative(1)
           }
         },
         {
@@ -607,10 +798,20 @@ function buildAppMenu(): Menu {
           label: 'Detach active tenant',
           accelerator: 'CmdOrCtrl+Shift+D',
           click: () => {
-            const profile = store.profiles.find((item) => item.id === store.activeProfileId)
-            if (profile && !isDetached(profile.id)) {
-              detachProfile(profile)
-            }
+            void runShortcutAction('tenant.detach')
+          }
+        },
+        {
+          label: 'Return tenant to main window',
+          accelerator: 'CmdOrCtrl+Shift+A',
+          click: () => {
+            void runShortcutAction('tenant.reattach')
+          }
+        },
+        {
+          label: 'Focus message box',
+          click: () => {
+            void runShortcutAction('compose.focus')
           }
         },
         { type: 'separator' },

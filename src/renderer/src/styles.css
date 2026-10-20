@@ -673,3 +673,134 @@ button {
   height: 100%;
   background: #1f1f1f;
 }
+
+.command-palette-backdrop {
+  align-items: start;
+  padding-top: min(18vh, 140px);
+}
+
+.command-palette {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(70vh, 520px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--sidebar-border);
+  background: #252423;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.command-palette-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.command-palette-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 500;
+  outline: none;
+}
+
+.command-palette-input::placeholder {
+  color: var(--quiet);
+}
+
+.command-palette-kbd,
+.command-palette-accel,
+.command-palette-footer kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--sidebar-border);
+  background: #1a1918;
+  color: var(--quiet);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.command-palette-list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+}
+
+.command-palette-empty {
+  padding: 18px 12px;
+  color: var(--quiet);
+  font-size: 13px;
+  text-align: center;
+}
+
+.command-palette-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-palette-item:hover,
+.command-palette-item.active {
+  background: var(--active);
+}
+
+.command-palette-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.command-palette-item-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.command-palette-item-hint {
+  font-size: 11px;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-accel {
+  flex-shrink: 0;
+}
+
+.command-palette-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--sidebar-border);
+  color: var(--quiet);
+  font-size: 11px;
+}
+
+.command-palette-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
