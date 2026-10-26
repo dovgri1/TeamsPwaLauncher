@@ -143,7 +143,7 @@ export function CommandPalette({
             ref={inputRef}
             className="command-palette-input"
             type="text"
-            placeholder="Search chats, teams, calendar…"
+            placeholder="Search chats or calendar…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={onKeyDown}
@@ -161,8 +161,8 @@ export function CommandPalette({
           {filtered.length === 0 ? (
             <div className="command-palette-empty">
               {conversationCount === 0
-                ? 'No matches. Open Chat or Teams in the app first so conversations can be listed.'
-                : 'No matching chats or commands'}
+                ? 'No matches. Open Chat in Teams first so conversations can be listed.'
+                : 'No matching chats'}
             </div>
           ) : (
             filtered.map((item, index) => (
@@ -186,7 +186,7 @@ export function CommandPalette({
             <kbd>↵</kbd> open
           </span>
           <span>
-            <kbd>t</kbd> or <kbd>{modKey}+K</kbd> open palette
+            <kbd>{modKey}+T</kbd> open palette
           </span>
           {conversationCount > 0 ? <span>{conversationCount} conversations</span> : null}
         </div>

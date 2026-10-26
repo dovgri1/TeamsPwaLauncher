@@ -1825,35 +1825,15 @@ function handleShortcut(event: Electron.Event, input: Electron.Input, contents: 
   const isMainRenderer = contents === mainWindow?.webContents
   const isProfileView = isProfileTeamsView(contents)
 
-  if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 'k') {
-    // Only from shell or profile Teams views — not login/auth popups.
+  // Ctrl/Cmd+T opens the command palette (shell or profile Teams views — not login/auth popups).
+  if (ctrl && !input.shift && !input.alt && input.key.toLowerCase() === 't') {
+    if (formOverlayOpen) {
+      return
+    }
     if (isMainRenderer || isProfileView) {
       event.preventDefault()
       requestOpenPalette()
     }
-    return
-  }
-
-  // Bare "t" opens the command palette when not typing in compose (profile view or shell).
-  if (
-    !ctrl &&
-    !input.alt &&
-    !input.meta &&
-    !input.control &&
-    input.key.toLowerCase() === 't' &&
-    !input.isAutoRepeat
-  ) {
-    if (paletteOpen || formOverlayOpen) {
-      return
-    }
-    if (!isMainRenderer && !isProfileView) {
-      return
-    }
-    if (isProfileView && composingByContents.get(contents)) {
-      return
-    }
-    event.preventDefault()
-    requestOpenPalette()
     return
   }
 

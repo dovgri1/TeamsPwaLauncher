@@ -163,8 +163,8 @@ export function parseChatOpenIndex(actionId: string): number | null {
 }
 
 export function buildPaletteItems(
-  profiles: Profile[],
-  unread: UnreadMap,
+  _profiles: Profile[],
+  _unread: UnreadMap,
   options?: {
     modKey?: string
     detachedIds?: string[]
@@ -173,8 +173,6 @@ export function buildPaletteItems(
   }
 ): PaletteItem[] {
   const mod = options?.modKey ?? 'Ctrl'
-  const detached = new Set(options?.detachedIds ?? [])
-  const activeId = options?.activeProfileId ?? null
   const recentChats = options?.recentChats ?? []
 
   const conversationItems: PaletteItem[] = recentChats.map((chat) => {
@@ -198,32 +196,17 @@ export function buildPaletteItems(
     }
   })
 
-  const tenantItems: PaletteItem[] = profiles.map((profile, index) => {
-    const badge = unread[profile.id]
-    const unreadHint =
-      badge && badge.count > 0 ? `${badge.count}${badge.plus ? '+' : ''} unread` : undefined
-    const bits = [
-      profile.id === activeId ? 'active' : null,
-      detached.has(profile.id) ? 'detached' : null,
-      unreadHint
-    ].filter(Boolean)
-    return {
-      id: tenantSwitchActionId(profile.id),
-      label: `Tenant: ${profile.name}`,
-      keywords: ['tenant', 'profile', 'switch', 'account', profile.name.toLowerCase()],
-      accelerator: index < 9 ? `${mod}+${index + 1}` : undefined,
-      group: 'tenant' as const,
-      hint: bits.length ? bits.join(' · ') : undefined
-    }
-  })
-
-  const staticItems: PaletteItem[] = STATIC_ACTIONS.map((action) => ({
+  // Palette: recent chats + all-chats pane + calendar only.
+  // Tenants stay available via Ctrl+1–9 / menu.
+  const paletteActions = STATIC_ACTIONS.filter(
+    (action) => action.id === 'pane.chat' || action.id === 'pane.calendar'
+  ).map((action) => ({
     ...action,
+    label: action.id === 'pane.chat' ? 'All chats' : action.label,
     accelerator: action.accelerator?.split('Ctrl').join(mod)
   }))
 
-  // Conversations first so search naturally surfaces chats/channels.
-  return [...conversationItems, ...staticItems.filter((a) => a.group === 'chat'), ...tenantItems, ...staticItems.filter((a) => a.group !== 'chat')]
+  return [...conversationItems, ...paletteActions]
 }
 
 /** Word-aware fuzzy match; higher is better, -1 = no match. */

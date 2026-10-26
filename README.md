@@ -153,26 +153,24 @@ When Teams asks to share your screen, a picker lists your **screens** and **wind
 
 ### Shortcuts
 
-Press **`t`** (when you are **not** typing in the Teams message box) or **`Ctrl+K` / `⌘K`** to open the command palette. Type to search chats, channels, tenants, and commands; use ↑/↓ and Enter to open.
+Press **`Ctrl+T` / `⌘T`** to open the command palette. Type to search chats; use ↑/↓ and Enter to open.
 
 Palette includes:
 
 - Recent chats / channels from the current Teams view (search by name)
-- Open Chat, Teams, Notifications, Calendar
-- Focus message box / Teams search
-- Switch tenant, sidebar, reload, detach / reattach
+- All chats
+- Open Calendar
 
 | Shortcut | Action |
 | --- | --- |
-| `t` | Open command palette (not while typing a message) |
-| `Ctrl+K` (macOS: `⌘K`) | Open command palette (works while composing) |
+| `Ctrl+T` (macOS: `⌘T`) | Open command palette |
 | `Ctrl+1` … `Ctrl+9` | Switch to tenant 1–9 |
 | `Ctrl+↑` / `Ctrl+↓` | Previous / next tenant |
 | `Ctrl+B` | Toggle tenant sidebar |
 | `Ctrl+R` | Reload current tenant |
 | `Ctrl+Shift+D` / `Ctrl+Shift+A` | Detach / return tenant window |
 
-For richer chat/channel results, open **Chat** or **Teams** in the tenant first so the list is on screen when you press `t`.
+For richer chat/channel results, open **Chat** in the tenant first so the list is on screen when you press `Ctrl+T`.
 
 Right-click a profile to edit, detach/reattach, reload, clear session, or delete. Double-click to edit name / icon / color.
 

@@ -740,7 +740,7 @@ function buildAppMenu(): Menu {
       submenu: [
         {
           label: 'Command palette',
-          accelerator: 'CmdOrCtrl+K',
+          accelerator: 'CmdOrCtrl+T',
           click: () => openCommandPalette()
         },
         {
